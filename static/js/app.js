@@ -7,8 +7,16 @@ class SoaringCupEditor {
         this.currentEditIndex = -1;
         this.map = null;
         this.mapMarkers = {};
+        this.markerClusterGroup = null;
         this.sortColumn = null;
         this.sortDirection = 'asc';
+        
+        // Performance optimization settings
+        this.maxMarkersOnMap = 2000; // Limit markers for performance
+        this.tablePageSize = 100; // Virtual scrolling page size
+        this.currentTablePage = 0;
+        this.visibleWaypoints = []; // Currently displayed waypoints
+        this.updateTimeout = null; // Debounce timeout for smooth updates
         
         this.initializeApp();
     }
@@ -88,11 +96,36 @@ class SoaringCupEditor {
     }
 
     initializeMap() {
-        this.map = L.map('map').setView([50.0, 10.0], 6);
+        this.map = L.map('map', {
+            preferCanvas: true,          // Use canvas renderer for better performance
+            zoomAnimation: true,         // Keep zoom animations smooth
+            fadeAnimation: true,         // Keep fade animations
+            markerZoomAnimation: false   // Disable marker zoom animations to reduce jumpiness
+        }).setView([50.0, 10.0], 6);
         
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
+            attribution: '© OpenStreetMap contributors',
+            updateWhenIdle: true,        // Only update tiles when map stops moving
+            updateWhenZooming: false,    // Don't update during zoom for smoother experience
+            keepBuffer: 2                // Keep more tiles in memory for smoother panning
         }).addTo(this.map);
+
+        // Initialize marker cluster group with custom options for performance
+        this.markerClusterGroup = L.markerClusterGroup({
+            maxClusterRadius: 30,        // Even smaller cluster radius for smoother transitions
+            disableClusteringAtZoom: 11, // Stop clustering earlier at zoom level 11
+            spiderfyOnMaxZoom: true,
+            showCoverageOnHover: false,
+            zoomToBoundsOnClick: true,
+            removeOutsideVisibleBounds: false, // Keep all markers loaded - prevents panning jumpiness
+            animate: false,              // Disable all animations to prevent jumpiness
+            animateAddingMarkers: false, // Disable marker addition animations for performance
+            singleMarkerMode: false,     // Keep clustering even for single markers
+            spiderfyDistanceMultiplier: 1, // Reduce spiderfy animation
+            maxZoom: 18                  // Prevent clustering issues at high zoom
+        });
+        
+        this.map.addLayer(this.markerClusterGroup);
 
         // Add click handler for adding waypoints on map
         this.map.on('click', (e) => {
@@ -638,7 +671,7 @@ class SoaringCupEditor {
         if (tabName === 'map') {
             setTimeout(() => {
                 this.map.invalidateSize();
-                this.updateMapMarkers();
+                // Removed updateMapMarkers() - markers should already be loaded
             }, 100);
         }
     }
@@ -674,7 +707,7 @@ class SoaringCupEditor {
 
     updateUI() {
         this.updateTable();
-        this.updateMapMarkers();
+        this.updateMapMarkers(); // Use direct call instead of debounced for initial loads
         this.updateActionButtons();
         this.updateStatus();
     }
@@ -722,46 +755,80 @@ class SoaringCupEditor {
         });
     }
 
+    debouncedUpdateMapMarkers() {
+        // Clear any existing timeout
+        if (this.updateTimeout) {
+            clearTimeout(this.updateTimeout);
+        }
+        
+        // Set a new timeout for smoother updates
+        this.updateTimeout = setTimeout(() => {
+            this.updateMapMarkers();
+        }, 150); // 150ms delay for smooth updates
+    }
+
     updateMapMarkers() {
-        // Clear existing markers
-        Object.values(this.mapMarkers).forEach(marker => {
-            this.map.removeLayer(marker);
-        });
+        // Clear existing markers from cluster group
+        this.markerClusterGroup.clearLayers();
         this.mapMarkers = {};
 
-        // Add markers for all waypoints
-        this.waypoints.forEach((waypoint, index) => {
-            // Create custom icon based on waypoint style
-            const customIcon = createWaypointIcon(waypoint.style || 1, 24);
-            
-            const marker = L.marker([waypoint.latitude, waypoint.longitude], {
-                icon: customIcon
-            }).addTo(this.map);
-
-            // Get style info for popup
-            const styleInfo = getWaypointIcon(waypoint.style || 1);
-
-            // Create comprehensive popup content with all available fields
-            const popupContent = this.createDetailedPopup(waypoint, index, styleInfo);
-            
-            marker.bindPopup(popupContent, {
-                maxWidth: 350,
-                className: 'waypoint-detailed-popup'
-            });
-            this.mapMarkers[index] = marker;
-        });
-
-        // Fit bounds if there are waypoints
-        if (this.waypoints.length > 0) {
-            this.fitMapBounds();
+        // Show loading indicator for large datasets
+        if (this.waypoints.length > 1000) {
+            this.showLoadingIndicator(`Loading ${this.waypoints.length} waypoints on map...`);
         }
+
+        // Use requestAnimationFrame for smooth rendering
+        requestAnimationFrame(() => {
+            // Create markers array for batch adding to cluster group
+            const markers = [];
+            
+            // Add markers for all waypoints
+            this.waypoints.forEach((waypoint, index) => {
+                // Create custom icon based on waypoint style
+                const customIcon = createWaypointIcon(waypoint.style || 1, 24);
+                
+                const marker = L.marker([waypoint.latitude, waypoint.longitude], {
+                    icon: customIcon
+                });
+
+                // Get style info for popup
+                const styleInfo = getWaypointIcon(waypoint.style || 1);
+
+                // Use lazy popup creation for better performance
+                marker.on('click', () => {
+                    const popupContent = this.createDetailedPopup(waypoint, index, styleInfo);
+                    marker.bindPopup(popupContent, {
+                        maxWidth: 350,
+                        className: 'waypoint-detailed-popup'
+                    }).openPopup();
+                });
+                
+                this.mapMarkers[index] = marker;
+                markers.push(marker);
+            });
+
+            // Add all markers to cluster group at once for better performance
+            this.markerClusterGroup.addLayers(markers);
+
+            // Fit bounds if there are waypoints
+            if (this.waypoints.length > 0) {
+                this.fitMapBounds();
+            }
+
+            // Hide loading indicator with a small delay
+            setTimeout(() => {
+                this.hideLoadingIndicator();
+            }, 100);
+        });
     }
 
     fitMapBounds() {
         if (this.waypoints.length === 0) return;
 
-        const group = new L.featureGroup(Object.values(this.mapMarkers));
-        this.map.fitBounds(group.getBounds().pad(0.1));
+        // Use cluster group bounds for better performance
+        if (this.markerClusterGroup.getLayers().length > 0) {
+            this.map.fitBounds(this.markerClusterGroup.getBounds().pad(0.1));
+        }
     }
 
     updateActionButtons() {
@@ -974,6 +1041,45 @@ class SoaringCupEditor {
         div.textContent = text;
         return div.innerHTML;
     }
+
+    // Performance optimization methods
+    updateProgress(processed, total) {
+        // Update progress indicator for large dataset loading
+        const percent = Math.round((processed / total) * 100);
+        const progressElement = document.getElementById('loading-progress');
+        if (progressElement) {
+            progressElement.textContent = `Loading waypoints: ${percent}% (${processed}/${total})`;
+        }
+    }
+
+    showLoadingIndicator(message = 'Loading...') {
+        // Create loading overlay
+        let overlay = document.getElementById('loading-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'loading-overlay';
+            overlay.innerHTML = `
+                <div class="loading-content">
+                    <div class="spinner"></div>
+                    <div id="loading-progress">${message}</div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+        } else {
+            const progressElement = document.getElementById('loading-progress');
+            if (progressElement) {
+                progressElement.textContent = message;
+            }
+            overlay.style.display = 'flex';
+        }
+    }
+
+    hideLoadingIndicator() {
+        const overlay = document.getElementById('loading-overlay');
+        if (overlay) {
+            overlay.style.display = 'none';
+        }
+    }
 }
 
 // Initialize app when DOM is loaded
@@ -1012,6 +1118,62 @@ style.textContent = `
     .marker-popup p {
         margin: 5px 0;
         font-size: 14px;
+    }
+    
+    /* Loading overlay styles */
+    #loading-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 10000;
+    }
+    
+    .loading-content {
+        background: white;
+        padding: 2rem;
+        border-radius: 8px;
+        text-align: center;
+        min-width: 300px;
+    }
+    
+    .spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #f3f4f6;
+        border-top: 4px solid #3b82f6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 1rem;
+    }
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    #loading-progress {
+        color: #374151;
+        font-weight: 500;
+    }
+    
+    /* Map performance optimizations */
+    .leaflet-container {
+        will-change: transform;
+        transform: translateZ(0);
+    }
+    
+    .leaflet-tile-container {
+        will-change: transform;
+    }
+    
+    .leaflet-marker-icon, .leaflet-marker-shadow {
+        will-change: transform;
     }
 `;
 document.head.appendChild(style);
