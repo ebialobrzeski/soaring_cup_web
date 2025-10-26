@@ -18,6 +18,11 @@ class SoaringCupEditor {
         this.initializeMap();
         this.loadWaypoints();
         this.updateUI();
+        
+        // Since map tab is now default, ensure map renders properly
+        setTimeout(() => {
+            this.map.invalidateSize();
+        }, 100);
     }
 
     setupEventListeners() {
@@ -55,15 +60,26 @@ class SoaringCupEditor {
         document.getElementById('cancel-btn').addEventListener('click', () => this.hideWaypointModal());
         document.getElementById('waypoint-form').addEventListener('submit', (e) => this.handleWaypointSubmit(e));
         document.getElementById('fetch-elevation-btn').addEventListener('click', () => this.fetchElevation());
+        document.getElementById('paste-coords-btn').addEventListener('click', () => this.pasteCoordinates());
 
         // Map controls
         document.getElementById('fit-bounds-btn').addEventListener('click', () => this.fitMapBounds());
         document.getElementById('add-waypoint-map-btn').addEventListener('click', () => this.addWaypointOnMap());
+        document.getElementById('show-legend-btn').addEventListener('click', () => this.showLegendModal());
+
+        // Legend modal
+        document.getElementById('legend-close').addEventListener('click', () => this.hideLegendModal());
 
         // Close modal when clicking outside
         document.getElementById('waypoint-modal').addEventListener('click', (e) => {
             if (e.target.id === 'waypoint-modal') {
                 this.hideWaypointModal();
+            }
+        });
+
+        document.getElementById('legend-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'legend-modal') {
+                this.hideLegendModal();
             }
         });
 
@@ -248,21 +264,88 @@ class SoaringCupEditor {
         this.currentEditIndex = -1;
     }
 
+    showLegendModal() {
+        const modal = document.getElementById('legend-modal');
+        const legendItems = document.getElementById('legend-items');
+        
+        // Clear existing content
+        legendItems.innerHTML = '';
+        
+        // Create legend items for each waypoint type
+        Object.keys(WAYPOINT_ICONS).forEach(style => {
+            const config = WAYPOINT_ICONS[style];
+            const item = document.createElement('div');
+            item.className = 'legend-item';
+            item.innerHTML = `
+                <div class="legend-icon">
+                    <div style="
+                        width: 20px; 
+                        height: 20px; 
+                        background-image: url('${config.icon}'); 
+                        background-size: contain; 
+                        background-repeat: no-repeat; 
+                        background-position: center;
+                        display: inline-block;
+                        vertical-align: middle;
+                    "></div>
+                </div>
+                <div class="legend-label">
+                    <strong>${style}:</strong> ${config.name}
+                </div>
+            `;
+            legendItems.appendChild(item);
+        });
+        
+        modal.classList.add('show');
+    }
+
+    hideLegendModal() {
+        const modal = document.getElementById('legend-modal');
+        modal.classList.remove('show');
+    }
+
     async handleWaypointSubmit(event) {
         event.preventDefault();
         
         const formData = new FormData(event.target);
         const waypointData = {};
         
-        // Convert form data to object
-        for (let [key, value] of formData.entries()) {
-            if (key === 'latitude' || key === 'longitude') {
-                waypointData[key] = parseFloat(value);
-            } else if (key === 'style') {
-                waypointData[key] = parseInt(value);
-            } else {
-                waypointData[key] = value.trim();
-            }
+        // Handle basic fields
+        waypointData.name = formData.get('name').trim();
+        waypointData.code = formData.get('code').trim();
+        waypointData.country = formData.get('country').trim();
+        waypointData.latitude = parseFloat(formData.get('latitude'));
+        waypointData.longitude = parseFloat(formData.get('longitude'));
+        waypointData.style = parseInt(formData.get('style'));
+        waypointData.runway_direction = formData.get('runway_direction').trim();
+        waypointData.frequency = formData.get('frequency').trim();
+        waypointData.description = formData.get('description').trim();
+        
+        // Handle elevation with unit
+        const elevValue = formData.get('elevation_value');
+        const elevUnit = formData.get('elevation_unit');
+        if (elevValue && elevValue.trim()) {
+            waypointData.elevation = `${elevValue.trim()}${elevUnit}`;
+        } else {
+            waypointData.elevation = '';
+        }
+        
+        // Handle runway length with unit
+        const rwLenValue = formData.get('runway_length_value');
+        const rwLenUnit = formData.get('runway_length_unit');
+        if (rwLenValue && rwLenValue.trim()) {
+            waypointData.runway_length = `${rwLenValue.trim()}${rwLenUnit}`;
+        } else {
+            waypointData.runway_length = '';
+        }
+        
+        // Handle runway width with unit
+        const rwWidthValue = formData.get('runway_width_value');
+        const rwWidthUnit = formData.get('runway_width_unit');
+        if (rwWidthValue && rwWidthValue.trim()) {
+            waypointData.runway_width = `${rwWidthValue.trim()}${rwWidthUnit}`;
+        } else {
+            waypointData.runway_width = '';
         }
 
         try {
@@ -343,10 +426,38 @@ class SoaringCupEditor {
         }
     }
 
+    async deleteWaypointFromMap(index) {
+        const waypoint = this.waypoints[index];
+        if (!waypoint) {
+            this.showStatus('Waypoint not found', 'error');
+            return;
+        }
+
+        if (!confirm(`Delete waypoint "${waypoint.name}"?`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/waypoints/${index}`, {
+                method: 'DELETE'
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to delete waypoint');
+            }
+
+            await this.loadWaypoints();
+            this.showStatus(`Deleted waypoint "${waypoint.name}"`, 'success');
+        } catch (error) {
+            this.showStatus('Delete failed: ' + error.message, 'error');
+        }
+    }
+
     async fetchElevation() {
         const latInput = document.getElementById('wp-latitude');
         const lonInput = document.getElementById('wp-longitude');
-        const elevInput = document.getElementById('wp-elevation');
+        const elevValueInput = document.getElementById('wp-elevation-value');
+        const elevUnitSelect = document.getElementById('wp-elevation-unit');
         
         const lat = parseFloat(latInput.value);
         const lon = parseFloat(lonInput.value);
@@ -361,7 +472,8 @@ class SoaringCupEditor {
             const result = await response.json();
             
             if (result.success) {
-                elevInput.value = `${result.elevation}m`;
+                elevValueInput.value = result.elevation;
+                elevUnitSelect.value = 'm'; // API returns meters
                 this.showStatus('Elevation fetched successfully', 'success');
             } else {
                 this.showStatus('Error fetching elevation: ' + result.error, 'error');
@@ -385,9 +497,45 @@ class SoaringCupEditor {
         }
     }
 
-    addWaypointAtLocation(lat, lng) {
+    async addWaypointAtLocation(lat, lng) {
+        // Try to get town name using reverse geocoding
+        let waypointName = '';
+        
+        try {
+            // Use Nominatim (OpenStreetMap) reverse geocoding service
+            const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=10&addressdetails=1`);
+            if (response.ok) {
+                const data = await response.json();
+                
+                // Try to extract a meaningful place name
+                const address = data.address || {};
+                waypointName = address.town || 
+                              address.city || 
+                              address.village || 
+                              address.hamlet || 
+                              address.municipality || 
+                              address.county || 
+                              '';
+                
+                // If we got a name, clean it up
+                if (waypointName) {
+                    // Remove any extra spaces and capitalize properly
+                    waypointName = waypointName.trim();
+                }
+            }
+        } catch (error) {
+            console.warn('Could not fetch town name:', error);
+        }
+        
+        // Fallback to coordinate-based name if no town name found
+        if (!waypointName) {
+            const latDir = lat >= 0 ? 'N' : 'S';
+            const lonDir = lng >= 0 ? 'E' : 'W';
+            waypointName = `WP ${Math.abs(lat).toFixed(3)}${latDir} ${Math.abs(lng).toFixed(3)}${lonDir}`;
+        }
+        
         this.showWaypointModal({
-            name: '',
+            name: waypointName,
             latitude: lat,
             longitude: lng,
             code: '',
@@ -583,33 +731,23 @@ class SoaringCupEditor {
 
         // Add markers for all waypoints
         this.waypoints.forEach((waypoint, index) => {
-            const isAirfield = waypoint.runway_direction || waypoint.runway_length || waypoint.frequency;
+            // Create custom icon based on waypoint style
+            const customIcon = createWaypointIcon(waypoint.style || 1, 24);
             
             const marker = L.marker([waypoint.latitude, waypoint.longitude], {
-                icon: L.divIcon({
-                    className: `custom-marker ${isAirfield ? 'airfield-marker' : 'waypoint-marker'}`,
-                    html: `<i class="fas fa-${isAirfield ? 'plane' : 'map-pin'}"></i>`,
-                    iconSize: [20, 20],
-                    iconAnchor: [10, 10]
-                })
+                icon: customIcon
             }).addTo(this.map);
 
-            const popupContent = `
-                <div class="marker-popup">
-                    <h4>${this.escapeHtml(waypoint.name)}</h4>
-                    ${waypoint.code ? `<p><strong>Code:</strong> ${this.escapeHtml(waypoint.code)}</p>` : ''}
-                    <p><strong>Position:</strong> ${waypoint.latitude.toFixed(6)}, ${waypoint.longitude.toFixed(6)}</p>
-                    ${waypoint.elevation ? `<p><strong>Elevation:</strong> ${this.escapeHtml(waypoint.elevation)}</p>` : ''}
-                    ${waypoint.description ? `<p><strong>Description:</strong> ${this.escapeHtml(waypoint.description)}</p>` : ''}
-                    <div style="margin-top: 10px;">
-                        <button class="btn btn-sm btn-secondary" onclick="app.showWaypointModal(app.waypoints[${index}], ${index})">
-                            Edit
-                        </button>
-                    </div>
-                </div>
-            `;
+            // Get style info for popup
+            const styleInfo = getWaypointIcon(waypoint.style || 1);
+
+            // Create comprehensive popup content with all available fields
+            const popupContent = this.createDetailedPopup(waypoint, index, styleInfo);
             
-            marker.bindPopup(popupContent);
+            marker.bindPopup(popupContent, {
+                maxWidth: 350,
+                className: 'waypoint-detailed-popup'
+            });
             this.mapMarkers[index] = marker;
         });
 
@@ -659,6 +797,176 @@ class SoaringCupEditor {
     showLoading(show) {
         const overlay = document.getElementById('loading-overlay');
         overlay.style.display = show ? 'flex' : 'none';
+    }
+
+    async pasteCoordinates() {
+        try {
+            const text = await navigator.clipboard.readText();
+            const cleanText = text.trim();
+            
+            // Try to parse various coordinate formats
+            // Format: "lat, lon" (e.g., "52.7652, 23.1867")
+            const latLonMatch = cleanText.match(/(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)/);
+            
+            if (latLonMatch) {
+                const lat = parseFloat(latLonMatch[1]);
+                const lon = parseFloat(latLonMatch[2]);
+                
+                // Validate coordinates
+                if (lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+                    document.getElementById('wp-latitude').value = lat;
+                    document.getElementById('wp-longitude').value = lon;
+                    this.showStatus('Coordinates pasted successfully', 'success');
+                } else {
+                    this.showStatus('Invalid coordinate range. Latitude: -90 to 90, Longitude: -180 to 180', 'error');
+                }
+            } else {
+                this.showStatus('Could not parse coordinates. Expected format: "lat, lon" (e.g., "52.7652, 23.1867")', 'error');
+            }
+        } catch (error) {
+            this.showStatus('Could not access clipboard. Please paste manually.', 'error');
+        }
+    }
+
+    createDetailedPopup(waypoint, index, styleInfo) {
+        // Helper function to format coordinate display
+        const formatCoordinate = (value, type) => {
+            const abs = Math.abs(value);
+            const dir = type === 'lat' ? (value >= 0 ? 'N' : 'S') : (value >= 0 ? 'E' : 'W');
+            return `${abs.toFixed(6)}° ${dir}`;
+        };
+
+        // Helper function to check if field has meaningful value
+        const hasValue = (field) => field && field.toString().trim() !== '';
+
+        // Build information sections
+        let basicInfo = `
+            <div class="popup-section">
+                <h4 class="popup-title">${this.escapeHtml(waypoint.name)}</h4>
+                <div class="popup-field">
+                    <span class="field-label">Type:</span>
+                    <span class="field-value">${styleInfo.name} (${waypoint.style || 1})</span>
+                </div>
+            </div>
+        `;
+
+        // Identification section
+        let identificationSection = '';
+        if (hasValue(waypoint.code) || hasValue(waypoint.country)) {
+            identificationSection = `
+                <div class="popup-section">
+                    <h5 class="popup-section-title">Identification</h5>
+                    ${hasValue(waypoint.code) ? `
+                        <div class="popup-field">
+                            <span class="field-label">Code:</span>
+                            <span class="field-value">${this.escapeHtml(waypoint.code)}</span>
+                        </div>
+                    ` : ''}
+                    ${hasValue(waypoint.country) ? `
+                        <div class="popup-field">
+                            <span class="field-label">Country:</span>
+                            <span class="field-value">${this.escapeHtml(waypoint.country)}</span>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        // Position section (always present)
+        let positionSection = `
+            <div class="popup-section">
+                <h5 class="popup-section-title">Position</h5>
+                <div class="popup-field">
+                    <span class="field-label">Latitude:</span>
+                    <span class="field-value">${formatCoordinate(waypoint.latitude, 'lat')}</span>
+                </div>
+                <div class="popup-field">
+                    <span class="field-label">Longitude:</span>
+                    <span class="field-value">${formatCoordinate(waypoint.longitude, 'lon')}</span>
+                </div>
+                <div class="popup-field">
+                    <span class="field-label">Decimal:</span>
+                    <span class="field-value">${waypoint.latitude.toFixed(6)}, ${waypoint.longitude.toFixed(6)}</span>
+                </div>
+                ${hasValue(waypoint.elevation) ? `
+                    <div class="popup-field">
+                        <span class="field-label">Elevation:</span>
+                        <span class="field-value">${this.escapeHtml(waypoint.elevation)}</span>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+
+        // Airfield section
+        let airfieldSection = '';
+        if (hasValue(waypoint.runway_direction) || hasValue(waypoint.runway_length) || 
+            hasValue(waypoint.runway_width) || hasValue(waypoint.frequency)) {
+            airfieldSection = `
+                <div class="popup-section">
+                    <h5 class="popup-section-title">Airfield Information</h5>
+                    ${hasValue(waypoint.runway_direction) ? `
+                        <div class="popup-field">
+                            <span class="field-label">Runway Direction:</span>
+                            <span class="field-value">${this.escapeHtml(waypoint.runway_direction)}</span>
+                        </div>
+                    ` : ''}
+                    ${hasValue(waypoint.runway_length) ? `
+                        <div class="popup-field">
+                            <span class="field-label">Runway Length:</span>
+                            <span class="field-value">${this.escapeHtml(waypoint.runway_length)}</span>
+                        </div>
+                    ` : ''}
+                    ${hasValue(waypoint.runway_width) ? `
+                        <div class="popup-field">
+                            <span class="field-label">Runway Width:</span>
+                            <span class="field-value">${this.escapeHtml(waypoint.runway_width)}</span>
+                        </div>
+                    ` : ''}
+                    ${hasValue(waypoint.frequency) ? `
+                        <div class="popup-field">
+                            <span class="field-label">Radio Frequency:</span>
+                            <span class="field-value">${this.escapeHtml(waypoint.frequency)} MHz</span>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        // Description section
+        let descriptionSection = '';
+        if (hasValue(waypoint.description)) {
+            descriptionSection = `
+                <div class="popup-section">
+                    <h5 class="popup-section-title">Description</h5>
+                    <div class="popup-description">
+                        ${this.escapeHtml(waypoint.description)}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Action buttons
+        let actionsSection = `
+            <div class="popup-actions">
+                <button class="btn btn-sm btn-secondary" onclick="app.showWaypointModal(app.waypoints[${index}], ${index})">
+                    <i class="fas fa-edit"></i> Edit
+                </button>
+                <button class="btn btn-sm btn-danger" onclick="app.deleteWaypointFromMap(${index})">
+                    <i class="fas fa-trash"></i> Delete
+                </button>
+            </div>
+        `;
+
+        return `
+            <div class="marker-popup detailed-popup">
+                ${basicInfo}
+                ${identificationSection}
+                ${positionSection}
+                ${airfieldSection}
+                ${descriptionSection}
+                ${actionsSection}
+            </div>
+        `;
     }
 
     escapeHtml(text) {

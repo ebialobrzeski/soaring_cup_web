@@ -23,12 +23,24 @@ CORS(app)
 
 # Configuration
 UPLOAD_FOLDER = 'uploads'
+DATA_FOLDER = 'data'
 ALLOWED_EXTENSIONS = {'cup', 'csv'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
-# Ensure upload directory exists
+# Ensure directories exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(DATA_FOLDER, exist_ok=True)
+
+
+def get_session_data_file():
+    """Get the path to the session data file."""
+    session_id = session.get('session_id')
+    if not session_id:
+        import uuid
+        session_id = str(uuid.uuid4())
+        session['session_id'] = session_id
+    return os.path.join(DATA_FOLDER, f'session_{session_id}.json')
 
 
 def allowed_file(filename):
@@ -38,13 +50,29 @@ def allowed_file(filename):
 
 def get_session_waypoints():
     """Get waypoints from session storage."""
-    waypoints_data = session.get('waypoints', [])
-    return [Waypoint.from_dict(wp) for wp in waypoints_data]
+    try:
+        data_file = get_session_data_file()
+        if os.path.exists(data_file):
+            with open(data_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return [Waypoint.from_dict(wp) for wp in data.get('waypoints', [])]
+    except Exception as e:
+        print(f"Error loading session data: {e}")
+    return []
 
 
 def set_session_waypoints(waypoints):
     """Store waypoints in session storage."""
-    session['waypoints'] = [wp.to_dict() for wp in waypoints]
+    try:
+        data_file = get_session_data_file()
+        data = {
+            'waypoints': [wp.to_dict() for wp in waypoints],
+            'current_filename': session.get('current_filename', '')
+        }
+        with open(data_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Error saving session data: {e}")
 
 
 @app.route('/')
@@ -65,10 +93,22 @@ def add_waypoint():
     """Add a new waypoint."""
     try:
         data = request.get_json()
+        
+        # Auto-fetch elevation if not provided
+        if not data.get('elevation') and data.get('latitude') and data.get('longitude'):
+            try:
+                elevation = get_elevation(data['latitude'], data['longitude'])
+                if elevation > 0:  # Only use if valid elevation returned
+                    data['elevation'] = f"{elevation}m"
+            except Exception as e:
+                print(f"Warning: Could not fetch elevation: {e}")
+        
         waypoint = Waypoint.from_dict(data)
         
         waypoints = get_session_waypoints()
         waypoints.append(waypoint)
+        # Sort by name like desktop app
+        waypoints.sort(key=lambda w: w.name.lower())
         set_session_waypoints(waypoints)
         
         return jsonify({'success': True, 'waypoint': waypoint.to_dict()})
@@ -81,12 +121,29 @@ def update_waypoint(index):
     """Update an existing waypoint."""
     try:
         data = request.get_json()
-        waypoint = Waypoint.from_dict(data)
-        
         waypoints = get_session_waypoints()
+        
         if 0 <= index < len(waypoints):
+            original_waypoint = waypoints[index]
+            
+            # Check if coordinates changed and auto-fetch elevation if needed
+            coords_changed = (original_waypoint.latitude != data.get('latitude') or 
+                            original_waypoint.longitude != data.get('longitude'))
+            
+            if (coords_changed or not data.get('elevation')) and data.get('latitude') and data.get('longitude'):
+                try:
+                    elevation = get_elevation(data['latitude'], data['longitude'])
+                    if elevation > 0:  # Only use if valid elevation returned
+                        data['elevation'] = f"{elevation}m"
+                except Exception as e:
+                    print(f"Warning: Could not fetch elevation: {e}")
+            
+            waypoint = Waypoint.from_dict(data)
             waypoints[index] = waypoint
+            # Sort by name like desktop app
+            waypoints.sort(key=lambda w: w.name.lower())
             set_session_waypoints(waypoints)
+            
             return jsonify({'success': True, 'waypoint': waypoint.to_dict()})
         else:
             return jsonify({'success': False, 'error': 'Waypoint index out of range'}), 404
@@ -178,24 +235,24 @@ def download_file(file_format):
             return jsonify({'success': False, 'error': 'No waypoints to download'}), 400
         
         # Create temporary file
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=f'.{file_format}') as tmp_file:
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=f'.{file_format}', encoding='utf-8') as tmp_file:
             tmp_path = tmp_file.name
-            
-            if file_format.lower() == 'cup':
-                write_cup_file(waypoints, tmp_path)
-                mimetype = 'text/plain'
-                filename = session.get('current_filename', 'waypoints.cup')
-                if not filename.endswith('.cup'):
-                    filename = 'waypoints.cup'
-            elif file_format.lower() == 'csv':
-                write_csv_file(waypoints, tmp_path)
-                mimetype = 'text/csv'
-                filename = session.get('current_filename', 'waypoints.csv')
-                if not filename.endswith('.csv'):
-                    filename = 'waypoints.csv'
-            else:
-                os.unlink(tmp_path)
-                return jsonify({'success': False, 'error': 'Invalid format. Use "cup" or "csv".'}), 400
+        
+        if file_format.lower() == 'cup':
+            write_cup_file(tmp_path, waypoints)  # Correct parameter order: filepath, waypoints
+            mimetype = 'text/plain'
+            filename = session.get('current_filename', 'waypoints.cup')
+            if not filename.endswith('.cup'):
+                filename = 'waypoints.cup'
+        elif file_format.lower() == 'csv':
+            write_csv_file(tmp_path, waypoints)  # Correct parameter order: filepath, waypoints
+            mimetype = 'text/csv'
+            filename = session.get('current_filename', 'waypoints.csv')
+            if not filename.endswith('.csv'):
+                filename = 'waypoints.csv'
+        else:
+            os.unlink(tmp_path)
+            return jsonify({'success': False, 'error': 'Invalid format. Use "cup" or "csv".'}), 400
         
         return send_file(
             tmp_path,
@@ -205,6 +262,7 @@ def download_file(file_format):
         )
         
     except Exception as e:
+        print(f"Download error: {e}")  # Add debug logging
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

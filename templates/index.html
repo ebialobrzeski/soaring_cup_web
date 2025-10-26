@@ -32,18 +32,6 @@
                     <i class="fas fa-file-csv"></i> Save CSV
                 </button>
             </div>
-            
-            <div class="waypoint-actions">
-                <button id="add-waypoint-btn" class="btn btn-primary">
-                    <i class="fas fa-plus"></i> Add Waypoint
-                </button>
-                <button id="edit-waypoint-btn" class="btn btn-secondary" disabled>
-                    <i class="fas fa-edit"></i> Edit Selected
-                </button>
-                <button id="delete-waypoint-btn" class="btn btn-danger" disabled>
-                    <i class="fas fa-trash"></i> Delete Selected
-                </button>
-            </div>
         </div>
 
         <!-- Status Bar -->
@@ -54,18 +42,45 @@
 
         <!-- Tab Navigation -->
         <div class="tab-nav">
-            <button class="tab-btn active" data-tab="list">
-                <i class="fas fa-list"></i> List View
-            </button>
-            <button class="tab-btn" data-tab="map">
+            <button class="tab-btn active" data-tab="map">
                 <i class="fas fa-map"></i> Map View
+            </button>
+            <button class="tab-btn" data-tab="list">
+                <i class="fas fa-list"></i> List View
             </button>
         </div>
 
         <!-- Tab Content -->
         <div class="tab-content">
+            <!-- Map View Tab -->
+            <div id="map-tab" class="tab-pane active">
+                <div class="map-controls">
+                    <button id="fit-bounds-btn" class="btn btn-secondary">
+                        <i class="fas fa-expand-arrows-alt"></i> Fit All
+                    </button>
+                    <button id="add-waypoint-map-btn" class="btn btn-primary">
+                        <i class="fas fa-map-pin"></i> Add Waypoint on Map
+                    </button>
+                    <button id="show-legend-btn" class="btn btn-secondary">
+                        <i class="fas fa-info-circle"></i> Legend
+                    </button>
+                </div>
+                <div id="map" class="map-container"></div>
+            </div>
+
             <!-- List View Tab -->
-            <div id="list-tab" class="tab-pane active">
+            <div id="list-tab" class="tab-pane">
+                <div class="waypoint-actions">
+                    <button id="add-waypoint-btn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Add Waypoint
+                    </button>
+                    <button id="edit-waypoint-btn" class="btn btn-secondary" disabled>
+                        <i class="fas fa-edit"></i> Edit Selected
+                    </button>
+                    <button id="delete-waypoint-btn" class="btn btn-danger" disabled>
+                        <i class="fas fa-trash"></i> Delete Selected
+                    </button>
+                </div>
                 <div class="table-container">
                     <table id="waypoints-table" class="waypoints-table">
                         <thead>
@@ -86,19 +101,6 @@
                             <!-- Waypoints will be populated here -->
                         </tbody>
                     </table>
-                </div>
-            </div>
-
-            <!-- Map View Tab -->
-            <div id="map-tab" class="tab-pane">
-                <div id="map" class="map-container"></div>
-                <div class="map-controls">
-                    <button id="fit-bounds-btn" class="btn btn-secondary">
-                        <i class="fas fa-expand-arrows-alt"></i> Fit All
-                    </button>
-                    <button id="add-waypoint-map-btn" class="btn btn-primary">
-                        <i class="fas fa-map-pin"></i> Add Waypoint on Map
-                    </button>
                 </div>
             </div>
         </div>
@@ -141,6 +143,13 @@
                         <div class="form-group">
                             <label for="wp-country">Country</label>
                             <input type="text" id="wp-country" name="country" maxlength="3" placeholder="e.g., PL, US">
+                        </div>
+                        <div class="form-group">
+                            <label>&nbsp;</label>
+                            <button type="button" id="paste-coords-btn" class="btn btn-secondary">
+                                <i class="fas fa-clipboard"></i> Paste Coords
+                            </button>
+                            <small>Paste: lat, lon from clipboard</small>
                         </div>
                     </div>
                     
@@ -245,6 +254,20 @@
         </div>
     </div>
 
+    <!-- Legend Modal -->
+    <div id="legend-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Waypoint Icon Legend</h2>
+                <button class="close-btn" id="legend-close">&times;</button>
+            </div>
+            <div class="legend-content">
+                <p>Different waypoint types are displayed with specific icons from XCSoar:</p>
+                <div id="legend-items"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Loading Overlay -->
     <div id="loading-overlay" class="loading-overlay" style="display: none;">
         <div class="loading-spinner">
@@ -255,6 +278,7 @@
 
     <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="{{ url_for('static', filename='js/icon-mapping.js') }}"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>
