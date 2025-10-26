@@ -82,25 +82,83 @@ def parse_cup_file(file_path):
             latitude = parse_coordinate(fields[3]) if len(fields) > 3 else 0.0
             longitude = parse_coordinate(fields[4]) if len(fields) > 4 else 0.0
             
-            # Parse elevation (remove 'm' suffix)
+            # Parse elevation - use helper function to handle units
             elevation_str = fields[5] if len(fields) > 5 else '0'
-            elevation = int(re.sub(r'[^\d-]', '', elevation_str)) if elevation_str else 0
+            try:
+                # Remove units but keep decimal point
+                elevation = int(float(re.sub(r'[^\d.-]', '', elevation_str))) if elevation_str else 0
+            except (ValueError, AttributeError):
+                elevation = 0
             
             # Parse style
             style = int(fields[6]) if len(fields) > 6 and fields[6] else 1
             
-            # Parse runway info
+            # Parse runway info - CUP format can have two variants:
+            # Variant 1 (old): Single field with DDDLLLLWWW format (10 digits) or DDDLLLL (7 digits)
+            # Variant 2 (new): Three separate fields: rwdir (number), rwlen (with unit like "1350.0m"), rwwidth (with unit like "30.0m")
             runway_direction = 0
             runway_length = 0
-            if len(fields) > 7 and fields[7]:
-                runway_str = fields[7]
-                if len(runway_str) >= 7:  # DDDLLLL format
-                    runway_direction = int(runway_str[:3]) if runway_str[:3].isdigit() else 0
-                    runway_length = int(runway_str[3:7]) if runway_str[3:7].isdigit() else 0
+            runway_width = 0
+            frequency = ''
+            description = ''
             
-            # Parse frequency and description
-            frequency = fields[8] if len(fields) > 8 else ''
-            description = fields[9] if len(fields) > 9 else ''
+            # Check if we have runway data and determine format
+            if len(fields) > 7 and fields[7]:
+                runway_str = fields[7].strip()
+                
+                # Check if field 8 contains units (this determines the format)
+                # New format has: field7=number, field8=length with unit, field9=width with unit
+                has_units_in_field8 = len(fields) > 8 and fields[8] and ('m' in fields[8].lower() or 'ft' in fields[8].lower() or 'nm' in fields[8].lower())
+                
+                if has_units_in_field8:
+                    # New format: separate fields
+                    # Field 7 = rwdir (direction, just a number)
+                    try:
+                        runway_direction = int(float(runway_str)) if runway_str else 0
+                    except (ValueError, AttributeError):
+                        runway_direction = 0
+                    
+                    # Field 8 = rwlen (length with unit like "1350.0m")
+                    if len(fields) > 8 and fields[8]:
+                        try:
+                            runway_length = int(float(re.sub(r'[^\d.]', '', fields[8])))
+                        except (ValueError, AttributeError):
+                            runway_length = 0
+                    
+                    # Field 9 = rwwidth (width with unit like "30.0m")
+                    if len(fields) > 9 and fields[9]:
+                        try:
+                            runway_width = int(float(re.sub(r'[^\d.]', '', fields[9])))
+                        except (ValueError, AttributeError):
+                            runway_width = 0
+                    
+                    # Frequency is in field 10
+                    frequency = fields[10] if len(fields) > 10 else ''
+                    # Description is in field 11
+                    description = fields[11] if len(fields) > 11 else ''
+                    
+                elif runway_str.isdigit():
+                    # Old format: combined string DDDLLLLWWW or DDDLLLL
+                    if len(runway_str) >= 10:  # DDDLLLLWWW format (10 digits)
+                        runway_direction = int(runway_str[:3])
+                        runway_length = int(runway_str[3:7])
+                        runway_width = int(runway_str[7:10])
+                    elif len(runway_str) >= 7:  # Old format DDDLLLL (7 digits)
+                        runway_direction = int(runway_str[:3])
+                        runway_length = int(runway_str[3:7])
+                    
+                    # Frequency is in field 8
+                    frequency = fields[8] if len(fields) > 8 else ''
+                    # Description is in field 9
+                    description = fields[9] if len(fields) > 9 else ''
+                else:
+                    # Empty or invalid runway field
+                    frequency = fields[8] if len(fields) > 8 else ''
+                    description = fields[9] if len(fields) > 9 else ''
+            else:
+                # No runway info at all - fields shift back
+                frequency = fields[8] if len(fields) > 8 else ''
+                description = fields[9] if len(fields) > 9 else ''
             
             waypoint = Waypoint(
                 name=name,
@@ -112,6 +170,7 @@ def parse_cup_file(file_path):
                 style=style,
                 runway_direction=runway_direction,
                 runway_length=runway_length,
+                runway_width=runway_width,
                 frequency=frequency,
                 description=description
             )
@@ -127,7 +186,7 @@ def parse_cup_file(file_path):
 
 def write_cup_file(waypoints):
     """Write waypoints to CUP format string."""
-    lines = ['name,code,country,lat,lon,elev,style,rwdir,rwlen,freq,desc']
+    lines = ['name,code,country,lat,lon,elev,style,rwdir,rwlen,rwwidth,freq,desc']
     
     for waypoint in waypoints:
         lines.append(waypoint.to_cup_string())
@@ -191,6 +250,28 @@ def parse_csv_file(file_path):
             except ValueError:
                 pass
         
+        # Parse runway fields
+        runway_direction = 0
+        if 'runway_direction' in row and row['runway_direction']:
+            try:
+                runway_direction = int(row['runway_direction'])
+            except ValueError:
+                pass
+        
+        runway_length = 0
+        if 'runway_length' in row and row['runway_length']:
+            try:
+                runway_length = int(row['runway_length'])
+            except ValueError:
+                pass
+        
+        runway_width = 0
+        if 'runway_width' in row and row['runway_width']:
+            try:
+                runway_width = int(row['runway_width'])
+            except ValueError:
+                pass
+        
         description = row.get('description', row.get('Description', ''))
         frequency = row.get('frequency', row.get('Frequency', ''))
         
@@ -202,6 +283,9 @@ def parse_csv_file(file_path):
             longitude=longitude,
             elevation=elevation,
             style=style,
+            runway_direction=runway_direction,
+            runway_length=runway_length,
+            runway_width=runway_width,
             frequency=frequency,
             description=description
         )
@@ -217,7 +301,7 @@ def write_csv_file(waypoints):
     writer = csv.writer(output)
     
     # Write header
-    writer.writerow(['name', 'code', 'country', 'latitude', 'longitude', 'elevation', 'style', 'runway_direction', 'runway_length', 'frequency', 'description'])
+    writer.writerow(['name', 'code', 'country', 'latitude', 'longitude', 'elevation', 'style', 'runway_direction', 'runway_length', 'runway_width', 'frequency', 'description'])
     
     # Write waypoints
     for waypoint in waypoints:
@@ -231,6 +315,7 @@ def write_csv_file(waypoints):
             waypoint.style,
             waypoint.runway_direction,
             waypoint.runway_length,
+            waypoint.runway_width,
             waypoint.frequency,
             waypoint.description
         ])

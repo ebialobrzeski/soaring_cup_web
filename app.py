@@ -228,37 +228,34 @@ def upload_file():
 
 @app.route('/api/download/<file_format>')
 def download_file(file_format):
-    """Download waypoints as CUP or CSV file."""
+    """Download waypoints as CUP file."""
     try:
         waypoints = get_session_waypoints()
         if not waypoints:
             return jsonify({'success': False, 'error': 'No waypoints to download'}), 400
         
+        # Only support CUP format
+        if file_format.lower() != 'cup':
+            return jsonify({'success': False, 'error': 'Only CUP format is supported.'}), 400
+        
         # Create temporary file
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=f'.{file_format}', encoding='utf-8') as tmp_file:
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.cup', encoding='utf-8') as tmp_file:
             tmp_path = tmp_file.name
         
-        if file_format.lower() == 'cup':
-            write_cup_file(tmp_path, waypoints)  # Correct parameter order: filepath, waypoints
-            mimetype = 'text/plain'
-            filename = session.get('current_filename', 'waypoints.cup')
-            if not filename.endswith('.cup'):
-                filename = 'waypoints.cup'
-        elif file_format.lower() == 'csv':
-            write_csv_file(tmp_path, waypoints)  # Correct parameter order: filepath, waypoints
-            mimetype = 'text/csv'
-            filename = session.get('current_filename', 'waypoints.csv')
-            if not filename.endswith('.csv'):
-                filename = 'waypoints.csv'
-        else:
-            os.unlink(tmp_path)
-            return jsonify({'success': False, 'error': 'Invalid format. Use "cup" or "csv".'}), 400
+        # Get CUP content as string and write to file
+        content = write_cup_file(waypoints)
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        
+        filename = session.get('current_filename', 'waypoints.cup')
+        if not filename.endswith('.cup'):
+            filename = 'waypoints.cup'
         
         return send_file(
             tmp_path,
             as_attachment=True,
             download_name=filename,
-            mimetype=mimetype
+            mimetype='text/plain'
         )
         
     except Exception as e:

@@ -31,6 +31,9 @@ class SoaringCupEditor {
         setTimeout(() => {
             this.map.invalidateSize();
         }, 100);
+        
+        // Handle window resize to adjust map
+        this.setupResizeHandler();
     }
 
     setupEventListeners() {
@@ -38,7 +41,6 @@ class SoaringCupEditor {
         document.getElementById('file-upload').addEventListener('change', (e) => this.handleFileUpload(e));
         document.getElementById('new-btn').addEventListener('click', () => this.newFile());
         document.getElementById('save-cup-btn').addEventListener('click', () => this.downloadFile('cup'));
-        document.getElementById('save-csv-btn').addEventListener('click', () => this.downloadFile('csv'));
 
         // Waypoint operations
         document.getElementById('add-waypoint-btn').addEventListener('click', () => this.showWaypointModal());
@@ -93,6 +95,21 @@ class SoaringCupEditor {
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => this.handleKeyboardShortcuts(e));
+    }
+
+    setupResizeHandler() {
+        // Debounce resize events to avoid performance issues
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                // Only invalidate size if map tab is active
+                const mapTab = document.getElementById('map-tab');
+                if (mapTab && mapTab.classList.contains('active')) {
+                    this.map.invalidateSize();
+                }
+            }, 250); // 250ms debounce
+        });
     }
 
     initializeMap() {
@@ -208,18 +225,18 @@ class SoaringCupEditor {
         }
 
         try {
-            const response = await fetch(`/api/download/${format}`);
+            const response = await fetch('/api/download/cup');
             if (response.ok) {
                 const blob = await response.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `waypoints.${format}`;
+                a.download = 'waypoints.cup';
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
                 window.URL.revokeObjectURL(url);
-                this.showStatus(`Downloaded ${this.waypoints.length} waypoints as ${format.toUpperCase()}`, 'success');
+                this.showStatus(`Downloaded ${this.waypoints.length} waypoints as CUP`, 'success');
             } else {
                 const error = await response.json();
                 this.showStatus('Download failed: ' + error.error, 'error');
@@ -253,37 +270,22 @@ class SoaringCupEditor {
             document.getElementById('wp-frequency').value = waypoint.frequency || '';
             document.getElementById('wp-description').value = waypoint.description || '';
             
-            // Handle elevation with unit
+            // Handle elevation - backend returns int, so just display the value
             if (waypoint.elevation) {
-                const elevMatch = waypoint.elevation.toString().match(/^(\d+(?:\.\d+)?)(m|ft)?$/);
-                if (elevMatch) {
-                    document.getElementById('wp-elevation-value').value = elevMatch[1];
-                    document.getElementById('wp-elevation-unit').value = elevMatch[2] || 'm';
-                } else {
-                    document.getElementById('wp-elevation-value').value = waypoint.elevation;
-                }
+                document.getElementById('wp-elevation-value').value = waypoint.elevation;
+                document.getElementById('wp-elevation-unit').value = 'm';
             }
             
-            // Handle runway length with unit
+            // Handle runway length - backend returns int, so just display the value
             if (waypoint.runway_length) {
-                const lenMatch = waypoint.runway_length.toString().match(/^(\d+(?:\.\d+)?)(m|nm|ml)?$/);
-                if (lenMatch) {
-                    document.getElementById('wp-runway-length-value').value = lenMatch[1];
-                    document.getElementById('wp-runway-length-unit').value = lenMatch[2] || 'm';
-                } else {
-                    document.getElementById('wp-runway-length-value').value = waypoint.runway_length;
-                }
+                document.getElementById('wp-runway-length-value').value = waypoint.runway_length;
+                document.getElementById('wp-runway-length-unit').value = 'm';
             }
             
-            // Handle runway width with unit
+            // Handle runway width - backend returns int, so just display the value
             if (waypoint.runway_width) {
-                const widthMatch = waypoint.runway_width.toString().match(/^(\d+(?:\.\d+)?)(m|nm|ml)?$/);
-                if (widthMatch) {
-                    document.getElementById('wp-runway-width-value').value = widthMatch[1];
-                    document.getElementById('wp-runway-width-unit').value = widthMatch[2] || 'm';
-                } else {
-                    document.getElementById('wp-runway-width-value').value = waypoint.runway_width;
-                }
+                document.getElementById('wp-runway-width-value').value = waypoint.runway_width;
+                document.getElementById('wp-runway-width-unit').value = 'm';
             }
         }
 
@@ -736,7 +738,7 @@ class SoaringCupEditor {
                 <td>${this.escapeHtml(waypoint.country || '')}</td>
                 <td>${waypoint.latitude.toFixed(6)}</td>
                 <td>${waypoint.longitude.toFixed(6)}</td>
-                <td>${this.escapeHtml(waypoint.elevation || '')}</td>
+                <td>${waypoint.elevation ? waypoint.elevation + ' m' : ''}</td>
                 <td>${waypoint.style}</td>
                 <td>
                     <span class="airfield-indicator ${isAirfield ? 'airfield-yes' : 'airfield-no'}">
@@ -794,13 +796,13 @@ class SoaringCupEditor {
                 // Get style info for popup
                 const styleInfo = getWaypointIcon(waypoint.style || 1);
 
-                // Use lazy popup creation for better performance
-                marker.on('click', () => {
-                    const popupContent = this.createDetailedPopup(waypoint, index, styleInfo);
-                    marker.bindPopup(popupContent, {
-                        maxWidth: 350,
-                        className: 'waypoint-detailed-popup'
-                    }).openPopup();
+                // Create popup content and bind it to marker
+                const popupContent = this.createDetailedPopup(waypoint, index, styleInfo);
+                marker.bindPopup(popupContent, {
+                    maxWidth: 350,
+                    className: 'waypoint-detailed-popup',
+                    autoClose: true,
+                    closeOnClick: true
                 });
                 
                 this.mapMarkers[index] = marker;
@@ -837,7 +839,6 @@ class SoaringCupEditor {
         const singleSelection = this.selectedWaypoints.size === 1;
 
         document.getElementById('save-cup-btn').disabled = !hasWaypoints;
-        document.getElementById('save-csv-btn').disabled = !hasWaypoints;
         document.getElementById('edit-waypoint-btn').disabled = !singleSelection;
         document.getElementById('delete-waypoint-btn').disabled = !hasSelection;
     }
@@ -958,7 +959,7 @@ class SoaringCupEditor {
                 ${hasValue(waypoint.elevation) ? `
                     <div class="popup-field">
                         <span class="field-label">Elevation:</span>
-                        <span class="field-value">${this.escapeHtml(waypoint.elevation)}</span>
+                        <span class="field-value">${this.escapeHtml(waypoint.elevation)} m</span>
                     </div>
                 ` : ''}
             </div>
@@ -980,13 +981,13 @@ class SoaringCupEditor {
                     ${hasValue(waypoint.runway_length) ? `
                         <div class="popup-field">
                             <span class="field-label">Runway Length:</span>
-                            <span class="field-value">${this.escapeHtml(waypoint.runway_length)}</span>
+                            <span class="field-value">${this.escapeHtml(waypoint.runway_length)} m</span>
                         </div>
                     ` : ''}
                     ${hasValue(waypoint.runway_width) ? `
                         <div class="popup-field">
                             <span class="field-label">Runway Width:</span>
-                            <span class="field-value">${this.escapeHtml(waypoint.runway_width)}</span>
+                            <span class="field-value">${this.escapeHtml(waypoint.runway_width)} m</span>
                         </div>
                     ` : ''}
                     ${hasValue(waypoint.frequency) ? `
