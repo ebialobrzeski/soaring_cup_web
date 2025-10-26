@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Soaring CUP File Editor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-plane"></i> Soaring CUP File Editor</h1>
+            <p>Edit and manage waypoint files for soaring and gliding</p>
+        </header>
+
+        <!-- Action Bar -->
+        <div class="action-bar">
+            <div class="file-actions">
+                <button id="new-btn" class="btn btn-primary">
+                    <i class="fas fa-file"></i> New
+                </button>
+                <label for="file-upload" class="btn btn-primary">
+                    <i class="fas fa-folder-open"></i> Open File
+                </label>
+                <input type="file" id="file-upload" accept=".cup,.csv" style="display: none;">
+                <button id="save-cup-btn" class="btn btn-success" disabled>
+                    <i class="fas fa-save"></i> Save CUP
+                </button>
+                <button id="save-csv-btn" class="btn btn-success" disabled>
+                    <i class="fas fa-file-csv"></i> Save CSV
+                </button>
+            </div>
+            
+            <div class="waypoint-actions">
+                <button id="add-waypoint-btn" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> Add Waypoint
+                </button>
+                <button id="edit-waypoint-btn" class="btn btn-secondary" disabled>
+                    <i class="fas fa-edit"></i> Edit Selected
+                </button>
+                <button id="delete-waypoint-btn" class="btn btn-danger" disabled>
+                    <i class="fas fa-trash"></i> Delete Selected
+                </button>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div id="status-bar" class="status-bar">
+            <span id="status-text">Ready - No waypoints loaded</span>
+            <span id="waypoint-count">0 waypoints</span>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="tab-nav">
+            <button class="tab-btn active" data-tab="list">
+                <i class="fas fa-list"></i> List View
+            </button>
+            <button class="tab-btn" data-tab="map">
+                <i class="fas fa-map"></i> Map View
+            </button>
+        </div>
+
+        <!-- Tab Content -->
+        <div class="tab-content">
+            <!-- List View Tab -->
+            <div id="list-tab" class="tab-pane active">
+                <div class="table-container">
+                    <table id="waypoints-table" class="waypoints-table">
+                        <thead>
+                            <tr>
+                                <th><input type="checkbox" id="select-all"></th>
+                                <th data-sort="name">Name <i class="fas fa-sort"></i></th>
+                                <th data-sort="code">Code <i class="fas fa-sort"></i></th>
+                                <th data-sort="country">Country <i class="fas fa-sort"></i></th>
+                                <th data-sort="latitude">Latitude <i class="fas fa-sort"></i></th>
+                                <th data-sort="longitude">Longitude <i class="fas fa-sort"></i></th>
+                                <th data-sort="elevation">Elevation <i class="fas fa-sort"></i></th>
+                                <th data-sort="style">Style <i class="fas fa-sort"></i></th>
+                                <th>Airfield</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="waypoints-tbody">
+                            <!-- Waypoints will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Map View Tab -->
+            <div id="map-tab" class="tab-pane">
+                <div id="map" class="map-container"></div>
+                <div class="map-controls">
+                    <button id="fit-bounds-btn" class="btn btn-secondary">
+                        <i class="fas fa-expand-arrows-alt"></i> Fit All
+                    </button>
+                    <button id="add-waypoint-map-btn" class="btn btn-primary">
+                        <i class="fas fa-map-pin"></i> Add Waypoint on Map
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Waypoint Edit Modal -->
+    <div id="waypoint-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">Add Waypoint</h2>
+                <button class="close-btn" id="modal-close">&times;</button>
+            </div>
+            
+            <!-- Tab Navigation for Modal -->
+            <div class="modal-tab-nav">
+                <button type="button" class="modal-tab-btn active" data-modal-tab="basic">
+                    <i class="fas fa-info-circle"></i> Basic Info
+                </button>
+                <button type="button" class="modal-tab-btn" data-modal-tab="airfield">
+                    <i class="fas fa-plane"></i> Airfield Info
+                </button>
+                <button type="button" class="modal-tab-btn" data-modal-tab="details">
+                    <i class="fas fa-file-text"></i> Details
+                </button>
+            </div>
+            
+            <form id="waypoint-form" class="waypoint-form">
+                <!-- Basic Info Tab -->
+                <div id="modal-basic-tab" class="modal-tab-pane active">
+                    <h3>Basic Information</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="wp-name">Name *</label>
+                            <input type="text" id="wp-name" name="name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="wp-code">Code</label>
+                            <input type="text" id="wp-code" name="code" placeholder="e.g., EPBK">
+                        </div>
+                        <div class="form-group">
+                            <label for="wp-country">Country</label>
+                            <input type="text" id="wp-country" name="country" maxlength="3" placeholder="e.g., PL, US">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="wp-latitude">Latitude *</label>
+                            <input type="number" id="wp-latitude" name="latitude" step="any" required placeholder="e.g., 52.7652">
+                            <small>Decimal degrees, positive = North</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="wp-longitude">Longitude *</label>
+                            <input type="number" id="wp-longitude" name="longitude" step="any" required placeholder="e.g., 23.1867">
+                            <small>Decimal degrees, positive = East</small>
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="wp-elevation-value">Elevation</label>
+                            <div class="input-group">
+                                <input type="number" id="wp-elevation-value" name="elevation_value" step="any" placeholder="504.0">
+                                <select id="wp-elevation-unit" name="elevation_unit">
+                                    <option value="m">m</option>
+                                    <option value="ft">ft</option>
+                                </select>
+                                <button type="button" id="fetch-elevation-btn" class="btn btn-sm">
+                                    <i class="fas fa-download"></i> Fetch
+                                </button>
+                            </div>
+                            <small>Leave empty to auto-fetch</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="wp-style">Style</label>
+                            <select id="wp-style" name="style">
+                                {% for value, label in style_options.items() %}
+                                <option value="{{ value }}">{{ value }} - {{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Airfield Info Tab -->
+                <div id="modal-airfield-tab" class="modal-tab-pane">
+                    <h3>Airfield & Runway Information</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="wp-runway-direction">Runway Direction</label>
+                            <input type="text" id="wp-runway-direction" name="runway_direction" placeholder="070, 180, 270 or 115.050">
+                            <small>3-digit heading (000-359) or PG format (115.050)</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="wp-frequency">Radio Frequency</label>
+                            <input type="text" id="wp-frequency" name="frequency" placeholder="122.500">
+                            <small>MHz (100-150 typical aviation range)</small>
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="wp-runway-length-value">Runway Length</label>
+                            <div class="input-group">
+                                <input type="number" id="wp-runway-length-value" name="runway_length_value" step="any" placeholder="1200">
+                                <select id="wp-runway-length-unit" name="runway_length_unit">
+                                    <option value="m">m</option>
+                                    <option value="nm">nm</option>
+                                    <option value="ml">ml</option>
+                                </select>
+                            </div>
+                            <small>m=meters, nm=nautical miles, ml=statute miles</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="wp-runway-width-value">Runway Width</label>
+                            <div class="input-group">
+                                <input type="number" id="wp-runway-width-value" name="runway_width_value" step="any" placeholder="30">
+                                <select id="wp-runway-width-unit" name="runway_width_unit">
+                                    <option value="m">m</option>
+                                    <option value="nm">nm</option>
+                                    <option value="ml">ml</option>
+                                </select>
+                            </div>
+                            <small>m=meters, nm=nautical miles, ml=statute miles</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Details Tab -->
+                <div id="modal-details-tab" class="modal-tab-pane">
+                    <h3>Additional Information</h3>
+                    <div class="form-group">
+                        <label for="wp-description">Description</label>
+                        <textarea id="wp-description" name="description" rows="10" placeholder="Free text description or notes"></textarea>
+                        <small>Free text description or notes</small>
+                    </div>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" id="cancel-btn" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Waypoint</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay" style="display: none;">
+        <div class="loading-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>Loading...</p>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
