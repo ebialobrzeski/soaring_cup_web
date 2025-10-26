@@ -1,26 +1,34 @@
 #!/bin/bash
-# Startup script for Soaring CUP File Editor Web Application
+# Simple startup script for Soaring CUP Web Editor
 
-echo "Starting Soaring CUP File Editor Web Application..."
+echo "Starting Soaring CUP Web Editor..."
 
 # Check if Python is available
-if ! command -v python &> /dev/null
-then
-    echo "Python is not installed or not in PATH"
+if ! command -v python3 &> /dev/null; then
+    echo "ERROR: Python 3 is not installed or not in PATH"
     exit 1
 fi
 
-# Check if requirements are installed
-if ! python -c "import flask" &> /dev/null
-then
-    echo "Installing Python dependencies..."
-    pip install -r requirements.txt
+# Install requirements if needed
+if [ ! -f "requirements_installed.flag" ]; then
+    echo "Installing Python requirements..."
+    pip3 install -r requirements.txt
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to install requirements"
+        exit 1
+    fi
+    touch requirements_installed.flag
 fi
 
-# Create uploads directory if it doesn't exist
-mkdir -p uploads
+# Start the web application
+echo "Starting web server..."
+echo "Open your browser to: http://localhost:5000"
 
-# Start the Flask application
-echo "Starting web server on http://localhost:5000"
-echo "Press Ctrl+C to stop the server"
-python app.py
+# Try to open browser automatically
+if command -v xdg-open &> /dev/null; then
+    xdg-open http://localhost:5000 &
+elif command -v open &> /dev/null; then
+    open http://localhost:5000 &
+fi
+
+python3 app.py

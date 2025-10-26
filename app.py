@@ -11,11 +11,11 @@ from flask import Flask, render_template, request, jsonify, send_file, session
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-from backend.soaring_cup_file_editor.models import Waypoint
-from backend.soaring_cup_file_editor.file_io import (
+from backend.models import Waypoint
+from backend.file_io import (
     parse_cup_file, write_cup_file, parse_csv_file, write_csv_file, get_elevation
 )
-from backend.soaring_cup_file_editor.config import STYLE_OPTIONS
+from backend.config import STYLE_OPTIONS
 
 app = Flask(__name__)
 app.secret_key = 'soaring_cup_editor_secret_key_change_in_production'

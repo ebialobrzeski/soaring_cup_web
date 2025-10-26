@@ -186,7 +186,7 @@
                         <div class="form-group">
                             <label for="wp-style">Style</label>
                             <select id="wp-style" name="style">
-                                {% for value, label in style_options.items() %}
+                                {% for value, label in style_options %}
                                 <option value="{{ value }}">{{ value }} - {{ label }}</option>
                                 {% endfor %}
                             </select>
