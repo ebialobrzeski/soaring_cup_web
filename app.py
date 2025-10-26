@@ -18,7 +18,7 @@ from backend.file_io import (
 from backend.config import STYLE_OPTIONS
 
 app = Flask(__name__)
-app.secret_key = 'soaring_cup_editor_secret_key_change_in_production'
+app.secret_key = os.environ.get('SECRET_KEY', 'soaring_cup_editor_secret_key_change_in_production')
 CORS(app)
 
 # Configuration

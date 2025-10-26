@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  soaring-cup-web:
+    build: .
+    container_name: soaring_cup_web
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      # Persist uploaded files and session data
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    environment:
+      - FLASK_ENV=production
+      - SECRET_KEY=${SECRET_KEY:-change_this_secret_key_in_production}
+    networks:
+      - soaring-network
+
+networks:
+  soaring-network:
+    driver: bridge

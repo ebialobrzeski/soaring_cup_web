@@ -1,0 +1,13 @@
+tunnel: YOUR_TUNNEL_ID_HERE
+credentials-file: /home/pi/.cloudflared/YOUR_TUNNEL_ID_HERE.json
+
+ingress:
+  # Route your domain to the application
+  - hostname: soaring.yourdomain.com
+    service: http://localhost:5000
+  
+  # Catch-all rule (required)
+  - service: http_status:404
+
+# Optional: Logging configuration
+# loglevel: info
