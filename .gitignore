@@ -1,0 +1,45 @@
+# Logs
+logs/*.log
+!logs/.gitkeep
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environment
+venv/
+.venv/
+env/
+ENV/
+
+# Flask
+instance/
+.webassets-cache
+
+# Session data (runtime files, not source code)
+data/*.json
+!data/.gitkeep
+
+# Uploaded files (runtime files, not source code)
+uploads/*
+!uploads/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+
+# Docker volumes (keep only source configs)
+# data/ and uploads/ handled above
