@@ -6,7 +6,10 @@ Converts the desktop Tkinter app to a web-based interface.
 import os
 import json
 import tempfile
+import logging
+from datetime import datetime
 from pathlib import Path
+from logging.handlers import RotatingFileHandler
 from flask import Flask, render_template, request, jsonify, send_file, session
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
@@ -27,6 +30,26 @@ DATA_FOLDER = 'data'
 ALLOWED_EXTENSIONS = {'cup', 'csv'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+
+# Configure logging
+if not app.debug:
+    # Create logs directory
+    os.makedirs('logs', exist_ok=True)
+    
+    # File handler with rotation
+    file_handler = RotatingFileHandler(
+        'logs/soaring_cup.log',
+        maxBytes=10485760,  # 10MB
+        backupCount=10
+    )
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+    ))
+    file_handler.setLevel(logging.INFO)
+    app.logger.addHandler(file_handler)
+    
+    app.logger.setLevel(logging.INFO)
+    app.logger.info('Soaring CUP Web startup')
 
 # Ensure directories exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -57,7 +80,7 @@ def get_session_waypoints():
                 data = json.load(f)
                 return [Waypoint.from_dict(wp) for wp in data.get('waypoints', [])]
     except Exception as e:
-        print(f"Error loading session data: {e}")
+        app.logger.error(f"Error loading session data: {e}")
     return []
 
 
@@ -72,13 +95,41 @@ def set_session_waypoints(waypoints):
         with open(data_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"Error saving session data: {e}")
+        app.logger.error(f"Error saving session data: {e}")
 
 
 @app.route('/')
 def index():
     """Main application page."""
     return render_template('index.html', style_options=STYLE_OPTIONS)
+
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint for monitoring."""
+    import requests
+    
+    health_status = {
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat()
+    }
+    
+    # Test external API connectivity
+    try:
+        response = requests.get('https://api.open-elevation.com/api/v1/lookup?locations=52.0,21.0', timeout=5)
+        health_status['elevation_api'] = 'reachable' if response.status_code == 200 else 'unreachable'
+        health_status['elevation_api_status'] = response.status_code
+    except requests.exceptions.Timeout:
+        health_status['elevation_api'] = 'timeout'
+        app.logger.warning('Elevation API timeout during health check')
+    except requests.exceptions.RequestException as e:
+        health_status['elevation_api'] = f'error: {str(e)}'
+        app.logger.warning(f'Elevation API error during health check: {e}')
+    except Exception as e:
+        health_status['elevation_api'] = f'unexpected error: {str(e)}'
+        app.logger.error(f'Unexpected error during health check: {e}')
+    
+    return jsonify(health_status), 200
 
 
 @app.route('/api/waypoints', methods=['GET'])
@@ -98,10 +149,12 @@ def add_waypoint():
         if not data.get('elevation') and data.get('latitude') and data.get('longitude'):
             try:
                 elevation = get_elevation(data['latitude'], data['longitude'])
-                if elevation > 0:  # Only use if valid elevation returned
+                if elevation and elevation > 0:  # Only use if valid elevation returned
                     data['elevation'] = f"{elevation}m"
+                    app.logger.info(f"Auto-fetched elevation {elevation}m for waypoint at {data['latitude']}, {data['longitude']}")
             except Exception as e:
-                print(f"Warning: Could not fetch elevation: {e}")
+                app.logger.warning(f"Could not fetch elevation: {e}")
+                # Continue without elevation - don't fail the whole operation
         
         waypoint = Waypoint.from_dict(data)
         
@@ -111,8 +164,12 @@ def add_waypoint():
         waypoints.sort(key=lambda w: w.name.lower())
         set_session_waypoints(waypoints)
         
+        app.logger.info(f"Added waypoint: {waypoint.name}")
         return jsonify({'success': True, 'waypoint': waypoint.to_dict()})
     except Exception as e:
+        import traceback
+        app.logger.error(f"Add waypoint error: {e}")
+        app.logger.error(traceback.format_exc())
         return jsonify({'success': False, 'error': str(e)}), 400
 
 
@@ -133,10 +190,12 @@ def update_waypoint(index):
             if (coords_changed or not data.get('elevation')) and data.get('latitude') and data.get('longitude'):
                 try:
                     elevation = get_elevation(data['latitude'], data['longitude'])
-                    if elevation > 0:  # Only use if valid elevation returned
+                    if elevation and elevation > 0:  # Only use if valid elevation returned
                         data['elevation'] = f"{elevation}m"
+                        app.logger.info(f"Auto-fetched elevation {elevation}m for waypoint at {data['latitude']}, {data['longitude']}")
                 except Exception as e:
-                    print(f"Warning: Could not fetch elevation: {e}")
+                    app.logger.warning(f"Could not fetch elevation: {e}")
+                    # Continue without elevation - don't fail the whole operation
             
             waypoint = Waypoint.from_dict(data)
             waypoints[index] = waypoint
@@ -144,10 +203,14 @@ def update_waypoint(index):
             waypoints.sort(key=lambda w: w.name.lower())
             set_session_waypoints(waypoints)
             
+            app.logger.info(f"Updated waypoint: {waypoint.name}")
             return jsonify({'success': True, 'waypoint': waypoint.to_dict()})
         else:
             return jsonify({'success': False, 'error': 'Waypoint index out of range'}), 404
     except Exception as e:
+        import traceback
+        app.logger.error(f"Update waypoint error: {e}")
+        app.logger.error(traceback.format_exc())
         return jsonify({'success': False, 'error': str(e)}), 400
 
 
@@ -170,9 +233,14 @@ def delete_waypoint(index):
 def fetch_elevation(lat, lon):
     """Fetch elevation for given coordinates."""
     try:
+        app.logger.info(f"Fetching elevation for {lat}, {lon}")
         elevation = get_elevation(lat, lon)
+        app.logger.info(f"Elevation result: {elevation}m")
         return jsonify({'success': True, 'elevation': elevation})
     except Exception as e:
+        import traceback
+        app.logger.error(f"Elevation fetch error: {e}")
+        app.logger.error(traceback.format_exc())
         return jsonify({'success': False, 'error': str(e)}), 400
 
 
@@ -208,6 +276,7 @@ def upload_file():
                 # Clean up uploaded file
                 os.remove(filepath)
                 
+                app.logger.info(f"Uploaded and parsed {filename}: {len(waypoints)} waypoints")
                 return jsonify({
                     'success': True, 
                     'message': f'Loaded {len(waypoints)} waypoints from {filename}',
@@ -218,6 +287,7 @@ def upload_file():
                 # Clean up on error
                 if os.path.exists(filepath):
                     os.remove(filepath)
+                app.logger.error(f"Error parsing file {filename}: {e}")
                 return jsonify({'success': False, 'error': f'Error parsing file: {str(e)}'}), 400
         
         return jsonify({'success': False, 'error': 'Invalid file type. Only .cup and .csv files are allowed.'}), 400
@@ -259,7 +329,9 @@ def download_file(file_format):
         )
         
     except Exception as e:
-        print(f"Download error: {e}")  # Add debug logging
+        app.logger.error(f"Download error: {e}")
+        import traceback
+        app.logger.error(traceback.format_exc())
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -268,6 +340,7 @@ def clear_waypoints():
     """Clear all waypoints from session."""
     session.pop('waypoints', None)
     session.pop('current_filename', None)
+    app.logger.info("Cleared all waypoints from session")
     return jsonify({'success': True, 'message': 'All waypoints cleared'})
 
 

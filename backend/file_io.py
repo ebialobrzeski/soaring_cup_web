@@ -324,11 +324,21 @@ def write_csv_file(waypoints):
 
 
 def get_elevation(latitude, longitude):
-    """Get elevation for coordinates using online API."""
+    """
+    Get elevation for coordinates using online API.
+    
+    Args:
+        latitude: Latitude in decimal degrees
+        longitude: Longitude in decimal degrees
+    
+    Returns:
+        int: Elevation in meters, or 0 if unavailable
+    """
     try:
         # Use open-elevation API
         url = f"https://api.open-elevation.com/api/v1/lookup?locations={latitude},{longitude}"
         response = requests.get(url, timeout=10)
+        response.raise_for_status()
         
         if response.status_code == 200:
             data = response.json()
@@ -337,5 +347,12 @@ def get_elevation(latitude, longitude):
                 return int(elevation) if elevation is not None else 0
         
         return 0
-    except Exception:
+    except requests.exceptions.Timeout:
+        print(f"Timeout fetching elevation for {latitude}, {longitude}")
+        return 0
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching elevation for {latitude}, {longitude}: {e}")
+        return 0
+    except Exception as e:
+        print(f"Unexpected error fetching elevation: {e}")
         return 0

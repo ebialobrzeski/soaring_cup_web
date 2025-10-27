@@ -18,11 +18,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p uploads data
+RUN mkdir -p uploads data logs
 
 # Set environment variables
 ENV FLASK_APP=app.py
 ENV PYTHONUNBUFFERED=1
+ENV FLASK_ENV=production
 
 # Expose port
 EXPOSE 5000

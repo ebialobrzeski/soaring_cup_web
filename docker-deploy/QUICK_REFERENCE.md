@@ -18,7 +18,7 @@ docker-compose logs --tail=50 # Last 50 lines
 
 ### Update Application
 ```bash
-cd ~/soaring_cup_web
+cd ~/GitHub/soaring_cup_web
 git pull
 docker-compose down
 docker-compose build
@@ -51,13 +51,13 @@ cloudflared tunnel info soaring-cup # Tunnel details
 
 ### Create Backup
 ```bash
-cd ~/soaring_cup_web
+cd ~/GitHub/soaring_cup_web
 tar -czf backup_$(date +%Y%m%d_%H%M%S).tar.gz data/ uploads/
 ```
 
 ### Restore Backup
 ```bash
-cd ~/soaring_cup_web
+cd ~/GitHub/soaring_cup_web
 tar -xzf backup_YYYYMMDD_HHMMSS.tar.gz
 docker-compose restart
 ```
@@ -138,14 +138,24 @@ echo -e "\n=== Last 10 App Logs ===" && docker-compose logs --tail=10
 
 ## Configuration Files
 
-- Application config: `~/soaring_cup_web/.env`
-- Docker compose: `~/soaring_cup_web/docker-compose.yml`
+- Application config: `~/GitHub/soaring_cup_web/.env`
+- Docker compose: `~/GitHub/soaring_cup_web/docker-compose.yml`
 - Cloudflare config: `/etc/cloudflared/config.yml`
 - Tunnel credentials: `~/.cloudflared/*.json`
 
 ## URLs
 
 - GitHub Repo: https://github.com/ebialobrzeski/soaring_cup_web
-- Local Access: http://localhost:5000
+- Local Access: http://127.0.0.1:5000
 - Public Access: https://your-domain.com
-- Cloudflare Dashboard: https://dash.cloudflare.com
+- Cloudflare Dashboard: https://one.dash.cloudflare.com
+
+## Quick Health Check
+
+Run all checks at once:
+```bash
+echo "=== Container Status ===" && docker-compose ps && \
+echo -e "\n=== Local Access ===" && curl -I http://127.0.0.1:5000 | head -1 && \
+echo -e "\n=== Tunnel Status ===" && sudo systemctl status cloudflared --no-pager | grep Active && \
+echo -e "\n=== Disk Space ===" && df -h / | tail -1
+```

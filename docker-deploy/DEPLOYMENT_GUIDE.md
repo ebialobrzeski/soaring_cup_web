@@ -11,6 +11,7 @@ Simple deployment guide for running the Soaring CUP Web application in Docker.
 - Docker and Docker Compose installed
 - Git installed
 - SSH access to your Raspberry Pi
+- Cloudflare Tunnel configured (optional, for external access)
 
 ---
 
@@ -19,7 +20,7 @@ Simple deployment guide for running the Soaring CUP Web application in Docker.
 ### 1. Clone Repository
 
 ```bash
-cd ~
+cd ~/GitHub
 git clone https://github.com/ebialobrzeski/soaring_cup_web.git
 cd soaring_cup_web
 ```
@@ -59,21 +60,29 @@ docker-compose ps
 
 You should see the container running.
 
-### 4. Test Locally
+### 4. Test the Application
 
 ```bash
-# Test the application
-curl http://localhost:5000
+# Test locally
+curl -I http://127.0.0.1:5000
 
-# View logs
-docker-compose logs -f
+# Should return: HTTP/1.1 200 OK
+
+# If you have Cloudflare Tunnel configured
+curl -I https://your-domain.com
+
+# Should return: HTTP/2 200
 ```
 
-Press `Ctrl+C` to exit logs.
+If you see `200 OK` responses, the application is running successfully! 🎉
 
-If you see HTML output and no errors, the application is running successfully! 🎉
+---
 
-The application is now available at `http://localhost:5000`
+## 🌐 Access Your Application
+
+- **Local network:** `http://YOUR_PI_IP:5000`
+- **Localhost (on Pi):** `http://127.0.0.1:5000`
+- **External (Cloudflare Tunnel):** `https://your-domain.com`
 
 ---
 
@@ -107,11 +116,14 @@ docker-compose up -d
 
 ```bash
 # Create backup
-cd ~/soaring_cup_web
+cd ~/GitHub/soaring_cup_web
 tar -czf backup_$(date +%Y%m%d_%H%M%S).tar.gz data/ uploads/
 
 # List backups
 ls -lh backup_*.tar.gz
+
+# Restore from backup
+tar -xzf backup_YYYYMMDD_HHMMSS.tar.gz
 ```
 
 ---
@@ -131,6 +143,22 @@ sudo netstat -tulpn | grep 5000
 docker-compose down
 docker-compose build --no-cache
 docker-compose up -d
+```
+
+### Can't Access via Domain
+
+```bash
+# 1. Verify app is running locally
+curl -I http://127.0.0.1:5000
+
+# 2. Check Cloudflare Tunnel status
+sudo systemctl status cloudflared
+
+# 3. View tunnel logs
+sudo journalctl -u cloudflared -f
+
+# 4. Test domain
+curl -I https://your-domain.com
 ```
 
 ### Permission Issues
@@ -155,19 +183,9 @@ docker stats soaring_cup_web
 
 # Check disk space
 df -h
-```
 
-### View Application Logs
-
-```bash
-# Real-time logs
-docker-compose logs -f
-
-# Last 100 lines
-docker-compose logs --tail=100
-
-# Logs from specific time
-docker-compose logs --since="2024-01-01T00:00:00"
+# View application logs
+docker-compose logs --tail=50
 ```
 
 ---
@@ -177,7 +195,7 @@ docker-compose logs --since="2024-01-01T00:00:00"
 When new features are released:
 
 ```bash
-cd ~/soaring_cup_web
+cd ~/GitHub/soaring_cup_web
 
 # Backup current data
 tar -czf backup_before_update_$(date +%Y%m%d).tar.gz data/ uploads/
@@ -191,6 +209,7 @@ docker-compose build
 docker-compose up -d
 
 # Verify it's working
+curl -I http://127.0.0.1:5000
 docker-compose logs -f
 ```
 
