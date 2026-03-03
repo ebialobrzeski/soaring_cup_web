@@ -356,3 +356,215 @@ def get_elevation(latitude, longitude):
     except Exception as e:
         print(f"Unexpected error fetching elevation: {e}")
         return 0
+
+
+def write_task_cup(task_name, task_waypoints, obs_zones, options=None):
+    """
+    Generate a CUP file string containing waypoints and a task definition.
+    Compatible with SeeYou, XCSoar, and LK8000.
+
+    Args:
+        task_name: Name of the task
+        task_waypoints: list of Waypoint objects used in the task
+        obs_zones: list of dicts, one per task point, with ObsZone fields
+        options: dict with task-level options (NoStart, TaskTime, etc.)
+
+    Returns:
+        str: Complete CUP file content with waypoints and task section
+    """
+    if options is None:
+        options = {}
+
+    # --- waypoints section ---
+    lines = ['name,code,country,lat,lon,elev,style,rwdir,rwlen,rwwidth,freq,desc']
+    # Deduplicate waypoints while preserving task order reference
+    seen = {}
+    unique_waypoints = []
+    for wp in task_waypoints:
+        key = (wp.name, wp.latitude, wp.longitude)
+        if key not in seen:
+            seen[key] = wp
+            unique_waypoints.append(wp)
+    for wp in unique_waypoints:
+        lines.append(wp.to_cup_string())
+
+    # --- task section ---
+    lines.append('-----Related Tasks-----')
+
+    # Task declaration line: task name followed by quoted waypoint names
+    wp_names = ','.join(f'"{wp.name}"' for wp in task_waypoints)
+    lines.append(f'"{task_name}",{wp_names}')
+
+    # Options line
+    opt_parts = []
+    if options.get('noStart'):
+        opt_parts.append(f"NoStart={options['noStart']}")
+    if options.get('taskTime'):
+        opt_parts.append(f"TaskTime={options['taskTime']}")
+    opt_parts.append("WpDis=True")
+    if options.get('nearDis'):
+        opt_parts.append(f"NearDis={options['nearDis']}")
+    if options.get('nearAlt'):
+        opt_parts.append(f"NearAlt={options['nearAlt']}")
+    lines.append('Options,' + ','.join(opt_parts))
+
+    # ObsZone lines
+    for i, oz in enumerate(obs_zones):
+        style = oz.get('style', 1)
+        r1 = oz.get('r1', '500m')
+        a1 = oz.get('a1', 180)
+        r2 = oz.get('r2', '0m')
+        a2 = oz.get('a2', 180)
+        a12 = oz.get('a12', 0.0)
+        is_line = oz.get('isLine', False)
+        move = 'True' if oz.get('move', True) else 'False'
+        reduce = 'True' if oz.get('reduce', False) else 'False'
+
+        # Ensure r1/r2 have unit suffix
+        r1_str = str(r1) if 'm' in str(r1) else f"{r1}m"
+        r2_str = str(r2) if 'm' in str(r2) else f"{r2}m"
+
+        line = (
+            f"ObsZone={i},Style={style},"
+            f"R1={r1_str},A1={a1},"
+            f"R2={r2_str},A2={a2},"
+            f"A12={a12},Line={1 if is_line else 0},"
+            f"Move={move},Reduce={reduce}"
+        )
+        lines.append(line)
+
+    return '\n'.join(lines) + '\n'
+
+
+def parse_task_cup(content):
+    """
+    Parse a CUP file containing a task section.
+
+    Returns:
+        dict with keys:
+          - waypoints: list of Waypoint dicts (from the waypoint section)
+          - task_name: str
+          - task_wp_names: list of waypoint names referenced in the task
+          - options: dict of task options
+          - obs_zones: list of ObsZone dicts (one per task point)
+    """
+    lines = content.strip().split('\n')
+
+    # Split into waypoint section and task section
+    task_start = -1
+    for i, line in enumerate(lines):
+        if '-----Related Tasks-----' in line:
+            task_start = i
+            break
+
+    if task_start < 0:
+        return None  # No task section found
+
+    # Parse waypoints from the top section
+    wp_lines = lines[:task_start]
+    waypoints = []
+    for line in wp_lines:
+        line = line.strip()
+        if not line or line.startswith('name,code'):
+            continue
+        try:
+            reader = csv.reader([line])
+            fields = next(reader)
+            if len(fields) < 6:
+                continue
+            name = fields[0]
+            code = fields[1] if len(fields) > 1 else ''
+            country = fields[2] if len(fields) > 2 else ''
+            latitude = parse_coordinate(fields[3]) if len(fields) > 3 else 0.0
+            longitude = parse_coordinate(fields[4]) if len(fields) > 4 else 0.0
+            elevation_str = fields[5] if len(fields) > 5 else '0'
+            try:
+                elevation = int(float(re.sub(r'[^\d.-]', '', elevation_str))) if elevation_str else 0
+            except (ValueError, AttributeError):
+                elevation = 0
+            style = int(fields[6]) if len(fields) > 6 and fields[6] else 1
+            waypoints.append({
+                'name': name, 'code': code, 'country': country,
+                'latitude': latitude, 'longitude': longitude,
+                'elevation': elevation, 'style': style
+            })
+        except Exception:
+            continue
+
+    # Parse task section
+    task_lines = lines[task_start + 1:]
+    task_name = ''
+    task_wp_names = []
+    options = {}
+    obs_zones = []
+
+    for line in task_lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # Task declaration line: "TaskName","WP1","WP2",...
+        if not line.startswith('Options') and not line.startswith('ObsZone'):
+            try:
+                reader = csv.reader([line])
+                fields = next(reader)
+                if len(fields) >= 2:
+                    task_name = fields[0]
+                    task_wp_names = list(fields[1:])
+            except Exception:
+                pass
+            continue
+
+        # Options line: Options,NoStart=12:00:00,TaskTime=03:00:00,...
+        if line.startswith('Options'):
+            parts = line.split(',')
+            for part in parts[1:]:
+                if '=' in part:
+                    key, val = part.split('=', 1)
+                    key = key.strip()
+                    val = val.strip()
+                    if key == 'NoStart':
+                        options['noStart'] = val
+                    elif key == 'TaskTime':
+                        options['taskTime'] = val
+            continue
+
+        # ObsZone line: ObsZone=0,Style=1,R1=500m,A1=180,...
+        if line.startswith('ObsZone'):
+            oz = {}
+            parts = line.split(',')
+            for part in parts:
+                if '=' not in part:
+                    continue
+                key, val = part.split('=', 1)
+                key = key.strip()
+                val = val.strip()
+                if key == 'ObsZone':
+                    oz['index'] = int(val)
+                elif key == 'Style':
+                    oz['style'] = int(val)
+                elif key == 'R1':
+                    oz['r1'] = int(float(re.sub(r'[^\d.]', '', val)))
+                elif key == 'A1':
+                    oz['a1'] = float(val)
+                elif key == 'R2':
+                    oz['r2'] = int(float(re.sub(r'[^\d.]', '', val)))
+                elif key == 'A2':
+                    oz['a2'] = float(val)
+                elif key == 'A12':
+                    oz['a12'] = float(val)
+                elif key == 'Line':
+                    oz['isLine'] = val == '1' or val.lower() == 'true'
+                elif key == 'Move':
+                    oz['move'] = val.lower() == 'true'
+                elif key == 'Reduce':
+                    oz['reduce'] = val.lower() == 'true'
+            obs_zones.append(oz)
+
+    return {
+        'waypoints': waypoints,
+        'task_name': task_name,
+        'task_wp_names': task_wp_names,
+        'options': options,
+        'obs_zones': obs_zones
+    }

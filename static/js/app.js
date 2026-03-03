@@ -34,6 +34,11 @@ class SoaringCupEditor {
         
         // Handle window resize to adjust map
         this.setupResizeHandler();
+
+        // Setup task planner listeners
+        if (window.taskPlanner) {
+            window.taskPlanner.setup();
+        }
     }
 
     setupEventListeners() {
@@ -129,17 +134,20 @@ class SoaringCupEditor {
 
         // Initialize marker cluster group with custom options for performance
         this.markerClusterGroup = L.markerClusterGroup({
-            maxClusterRadius: 30,        // Even smaller cluster radius for smoother transitions
-            disableClusteringAtZoom: 11, // Stop clustering earlier at zoom level 11
+            maxClusterRadius: 30,
+            disableClusteringAtZoom: 13, // Keep clustering until zoom 13 to reduce individual marker count
             spiderfyOnMaxZoom: true,
             showCoverageOnHover: false,
             zoomToBoundsOnClick: true,
-            removeOutsideVisibleBounds: false, // Keep all markers loaded - prevents panning jumpiness
-            animate: false,              // Disable all animations to prevent jumpiness
-            animateAddingMarkers: false, // Disable marker addition animations for performance
-            singleMarkerMode: false,     // Keep clustering even for single markers
-            spiderfyDistanceMultiplier: 1, // Reduce spiderfy animation
-            maxZoom: 18                  // Prevent clustering issues at high zoom
+            removeOutsideVisibleBounds: true, // Only render markers inside the visible viewport
+            animate: false,
+            animateAddingMarkers: false,
+            singleMarkerMode: false,
+            spiderfyDistanceMultiplier: 1,
+            chunkedLoading: true,        // Load markers in chunks to avoid blocking the UI thread
+            chunkInterval: 100,
+            chunkDelay: 50,
+            maxZoom: 18
         });
         
         this.map.addLayer(this.markerClusterGroup);
@@ -673,7 +681,13 @@ class SoaringCupEditor {
         if (tabName === 'map') {
             setTimeout(() => {
                 this.map.invalidateSize();
-                // Removed updateMapMarkers() - markers should already be loaded
+            }, 100);
+        }
+
+        // Initialize task planner map when switching to task tab
+        if (tabName === 'task' && window.taskPlanner) {
+            setTimeout(() => {
+                window.taskPlanner.initMap();
             }, 100);
         }
     }

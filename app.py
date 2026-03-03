@@ -5,6 +5,7 @@ Converts the desktop Tkinter app to a web-based interface.
 
 import os
 import json
+import uuid
 import tempfile
 import logging
 from datetime import datetime
@@ -16,7 +17,8 @@ from werkzeug.utils import secure_filename
 
 from backend.models import Waypoint
 from backend.file_io import (
-    parse_cup_file, write_cup_file, parse_csv_file, write_csv_file, get_elevation
+    parse_cup_file, write_cup_file, parse_csv_file, write_csv_file, get_elevation,
+    format_coordinate, write_task_cup, parse_task_cup
 )
 from backend.config import STYLE_OPTIONS
 
@@ -60,7 +62,6 @@ def get_session_data_file():
     """Get the path to the session data file."""
     session_id = session.get('session_id')
     if not session_id:
-        import uuid
         session_id = str(uuid.uuid4())
         session['session_id'] = session_id
     return os.path.join(DATA_FOLDER, f'session_{session_id}.json')
@@ -85,17 +86,48 @@ def get_session_waypoints():
 
 
 def set_session_waypoints(waypoints):
-    """Store waypoints in session storage."""
+    """Store waypoints in session storage (preserves task data)."""
     try:
         data_file = get_session_data_file()
-        data = {
-            'waypoints': [wp.to_dict() for wp in waypoints],
-            'current_filename': session.get('current_filename', '')
-        }
+        # Load existing data to preserve task state
+        existing = {}
+        if os.path.exists(data_file):
+            with open(data_file, 'r', encoding='utf-8') as f:
+                existing = json.load(f)
+        existing['waypoints'] = [wp.to_dict() for wp in waypoints]
+        existing['current_filename'] = session.get('current_filename', '')
         with open(data_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            json.dump(existing, f, ensure_ascii=False, indent=2)
     except Exception as e:
         app.logger.error(f"Error saving session data: {e}")
+
+
+def get_session_task():
+    """Get saved task from session storage."""
+    try:
+        data_file = get_session_data_file()
+        if os.path.exists(data_file):
+            with open(data_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get('task')
+    except Exception as e:
+        app.logger.error(f"Error loading task data: {e}")
+    return None
+
+
+def set_session_task(task_data):
+    """Store task in session storage (preserves waypoints)."""
+    try:
+        data_file = get_session_data_file()
+        existing = {}
+        if os.path.exists(data_file):
+            with open(data_file, 'r', encoding='utf-8') as f:
+                existing = json.load(f)
+        existing['task'] = task_data
+        with open(data_file, 'w', encoding='utf-8') as f:
+            json.dump(existing, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        app.logger.error(f"Error saving task data: {e}")
 
 
 @app.route('/')
@@ -348,6 +380,259 @@ def clear_waypoints():
 def get_style_options():
     """Get available waypoint style options."""
     return jsonify(STYLE_OPTIONS)
+
+
+@app.route('/api/task/export', methods=['POST'])
+def export_task():
+    """Export a task as a CUP file with waypoints and task definition."""
+    try:
+        data = request.get_json()
+        task_name = data.get('name', 'Task')
+        task_points = data.get('points', [])  # [{waypointIndex, obsZone}, ...]
+        task_options = data.get('options', {})
+
+        if len(task_points) < 2:
+            return jsonify({'success': False, 'error': 'A task needs at least 2 points (start + finish)'}), 400
+
+        waypoints = get_session_waypoints()
+
+        # Collect the waypoints used in the task
+        task_waypoints = []
+        for tp in task_points:
+            idx = tp.get('waypointIndex')
+            if idx is None or idx < 0 or idx >= len(waypoints):
+                return jsonify({'success': False, 'error': f'Invalid waypoint index: {idx}'}), 400
+            task_waypoints.append(waypoints[idx])
+
+        # Build obs zones from the request
+        obs_zones = [tp.get('obsZone', {}) for tp in task_points]
+
+        content = write_task_cup(task_name, task_waypoints, obs_zones, task_options)
+
+        return jsonify({'success': True, 'content': content})
+    except Exception as e:
+        import traceback
+        app.logger.error(f"Task export error: {e}")
+        app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/task/download', methods=['POST'])
+def download_task():
+    """Download a task as a CUP file."""
+    try:
+        data = request.get_json()
+        task_name = data.get('name', 'Task')
+        task_points = data.get('points', [])
+        task_options = data.get('options', {})
+
+        if len(task_points) < 2:
+            return jsonify({'success': False, 'error': 'A task needs at least 2 points'}), 400
+
+        waypoints = get_session_waypoints()
+
+        task_waypoints = []
+        for tp in task_points:
+            idx = tp.get('waypointIndex')
+            if idx is None or idx < 0 or idx >= len(waypoints):
+                return jsonify({'success': False, 'error': f'Invalid waypoint index: {idx}'}), 400
+            task_waypoints.append(waypoints[idx])
+
+        obs_zones = [tp.get('obsZone', {}) for tp in task_points]
+
+        content = write_task_cup(task_name, task_waypoints, obs_zones, task_options)
+
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.cup', encoding='utf-8') as tmp_file:
+            tmp_file.write(content)
+            tmp_path = tmp_file.name
+
+        filename = f"{task_name.replace(' ', '_')}.cup"
+        return send_file(
+            tmp_path,
+            as_attachment=True,
+            download_name=filename,
+            mimetype='text/plain'
+        )
+    except Exception as e:
+        app.logger.error(f"Task download error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# Store QR download tokens: {token: file_path}
+_qr_downloads = {}
+
+
+@app.route('/api/task/qr', methods=['POST'])
+def task_qr():
+    """Generate a downloadable task file and return a short download URL for QR encoding."""
+    try:
+        data = request.get_json()
+        task_name = data.get('name', 'Task')
+        task_points = data.get('points', [])
+        task_options = data.get('options', {})
+
+        if len(task_points) < 2:
+            return jsonify({'success': False, 'error': 'A task needs at least 2 points'}), 400
+
+        waypoints = get_session_waypoints()
+
+        task_waypoints = []
+        for tp in task_points:
+            idx = tp.get('waypointIndex')
+            if idx is None or idx < 0 or idx >= len(waypoints):
+                return jsonify({'success': False, 'error': f'Invalid waypoint index: {idx}'}), 400
+            task_waypoints.append(waypoints[idx])
+
+        obs_zones = [tp.get('obsZone', {}) for tp in task_points]
+        content = write_task_cup(task_name, task_waypoints, obs_zones, task_options)
+
+        # Save to a temp file with a unique token
+        token = uuid.uuid4().hex[:12]
+        filename = f"{task_name.replace(' ', '_')}.cup"
+        tmp_path = os.path.join(DATA_FOLDER, f'qr_{token}.cup')
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        _qr_downloads[token] = {'path': tmp_path, 'filename': filename}
+
+        return jsonify({'success': True, 'token': token})
+    except Exception as e:
+        app.logger.error(f"Task QR error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/dl/<token>')
+def qr_download(token):
+    """Serve a task file by its QR download token."""
+    info = _qr_downloads.get(token)
+    if not info or not os.path.exists(info['path']):
+        return 'File not found or expired', 404
+    return send_file(
+        info['path'],
+        as_attachment=True,
+        download_name=info['filename'],
+        mimetype='text/plain'
+    )
+
+
+@app.route('/api/task/save', methods=['POST'])
+def save_task():
+    """Save task state to session."""
+    try:
+        data = request.get_json()
+        set_session_task(data)
+        return jsonify({'success': True})
+    except Exception as e:
+        app.logger.error(f"Task save error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/task/load', methods=['GET'])
+def load_task():
+    """Load saved task state from session."""
+    try:
+        task = get_session_task()
+        if task:
+            return jsonify({'success': True, 'task': task})
+        return jsonify({'success': True, 'task': None})
+    except Exception as e:
+        app.logger.error(f"Task load error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/task/import', methods=['POST'])
+def import_task():
+    """Import a task from an uploaded CUP file."""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file uploaded'}), 400
+
+        file = request.files['file']
+        if not file.filename:
+            return jsonify({'success': False, 'error': 'No file selected'}), 400
+
+        content = file.read().decode('utf-8', errors='replace')
+        result = parse_task_cup(content)
+
+        if result is None:
+            return jsonify({'success': False, 'error': 'No task section found in file'}), 400
+
+        # Match task waypoint names to the session waypoints
+        session_waypoints = get_session_waypoints()
+        task_points = []
+
+        for i, wp_name in enumerate(result['task_wp_names']):
+            # Try to find matching waypoint in session by name
+            matched_idx = -1
+            for j, swp in enumerate(session_waypoints):
+                if swp.name.strip('"') == wp_name.strip('"'):
+                    matched_idx = j
+                    break
+
+            if matched_idx < 0:
+                # Try matching from the file's own waypoints by name, then by coordinates in session
+                file_wp = None
+                for fwp in result['waypoints']:
+                    if fwp['name'].strip('"') == wp_name.strip('"'):
+                        file_wp = fwp
+                        break
+                if file_wp:
+                    # Find closest session waypoint by coordinates
+                    best_idx = -1
+                    best_dist = float('inf')
+                    for j, swp in enumerate(session_waypoints):
+                        dlat = swp.latitude - file_wp['latitude']
+                        dlon = swp.longitude - file_wp['longitude']
+                        d = dlat * dlat + dlon * dlon
+                        if d < best_dist:
+                            best_dist = d
+                            best_idx = j
+                    # Accept if within ~500m (~0.005 degrees)
+                    if best_dist < 0.005 * 0.005:
+                        matched_idx = best_idx
+
+            # Build obsZone for this point
+            oz = {}
+            if i < len(result['obs_zones']):
+                oz = result['obs_zones'][i]
+
+            task_points.append({
+                'waypointIndex': matched_idx,
+                'waypointName': wp_name.strip('"'),
+                'obsZone': {
+                    'style': oz.get('style', 1),
+                    'r1': oz.get('r1', 3000),
+                    'a1': oz.get('a1', 45),
+                    'r2': oz.get('r2', 500),
+                    'a2': oz.get('a2', 180),
+                    'a12': oz.get('a12', 0),
+                    'isLine': oz.get('isLine', False),
+                    'move': oz.get('move', True),
+                    'reduce': oz.get('reduce', False),
+                    'directionMode': 'auto',
+                    'fixedBearing': None
+                },
+                'fileWaypoint': None
+            })
+
+            # If not matched, include file waypoint data so frontend can display it
+            if matched_idx < 0:
+                for fwp in result['waypoints']:
+                    if fwp['name'].strip('"') == wp_name.strip('"'):
+                        task_points[-1]['fileWaypoint'] = fwp
+                        break
+
+        return jsonify({
+            'success': True,
+            'task_name': result['task_name'],
+            'options': result['options'],
+            'points': task_points
+        })
+    except Exception as e:
+        import traceback
+        app.logger.error(f"Task import error: {e}")
+        app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 if __name__ == '__main__':

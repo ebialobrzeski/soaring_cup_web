@@ -12,10 +12,19 @@
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1><i class="fas fa-plane"></i> Soaring CUP File Editor</h1>
-            <p>Edit and manage waypoint files for soaring and gliding</p>
-        </header>
+        <div class="header-row">
+            <div class="header-spacer"></div>
+            <header>
+                <h1><i class="fas fa-plane"></i> Soaring CUP File Editor</h1>
+                <p>Edit and manage waypoint files for soaring and gliding</p>
+            </header>
+            <div class="coffee-banner">
+                <a href="https://www.buymeacoffee.com/emil.b" target="_blank" rel="noopener noreferrer">
+                    <img src="{{ url_for('static', filename='images/qr-buymeacoffee.png') }}" alt="Buy me a coffee QR code" class="coffee-qr">
+                    <span class="coffee-text">Like it? Buy me a coffee ☕</span>
+                </a>
+            </div>
+        </div>
 
         <!-- Action Bar -->
         <div class="action-bar">
@@ -47,6 +56,9 @@
             <button class="tab-btn" data-tab="list">
                 <i class="fas fa-list"></i> List View
             </button>
+            <button class="tab-btn" data-tab="task">
+                <i class="fas fa-route"></i> Task Planner
+            </button>
         </div>
 
         <!-- Tab Content -->
@@ -65,6 +77,86 @@
                     </button>
                 </div>
                 <div id="map" class="map-container"></div>
+            </div>
+
+            <!-- Task Planner Tab -->
+            <div id="task-tab" class="tab-pane">
+                <div class="task-planner">
+                    <div class="task-sidebar">
+                        <h3><i class="fas fa-route"></i> Task Definition</h3>
+
+                        <!-- Open task file -->
+                        <div class="task-import-row">
+                            <button id="task-open-btn" class="btn btn-secondary btn-sm">
+                                <i class="fas fa-folder-open"></i> Open Task File
+                            </button>
+                            <input type="file" id="task-file-input" accept=".cup" style="display:none">
+                        </div>
+
+                        <!-- Task name -->
+                        <div class="form-group">
+                            <label for="task-name">Task Name</label>
+                            <input type="text" id="task-name" value="Task 1" placeholder="Task name">
+                        </div>
+
+                        <!-- Task options -->
+                        <div class="task-options-panel">
+                            <details>
+                                <summary><i class="fas fa-cog"></i> Task Options</summary>
+                                <div class="task-options-body">
+                                    <div class="form-group">
+                                        <label for="task-no-start">No Start Before (UTC)</label>
+                                        <input type="time" id="task-no-start" value="12:00">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="task-time">Task Time (HH:MM:SS)</label>
+                                        <input type="text" id="task-time" value="03:00:00" placeholder="HH:MM:SS">
+                                    </div>
+                                </div>
+                            </details>
+                        </div>
+
+                        <!-- Search waypoints -->
+                        <div class="form-group">
+                            <label>Add Waypoint to Task</label>
+                            <input type="text" id="task-wp-search" placeholder="Search waypoints..." autocomplete="off">
+                            <div id="task-wp-results" class="task-wp-results"></div>
+                        </div>
+
+                        <!-- Task points list -->
+                        <div id="task-points-list" class="task-points-list">
+                            <p class="task-empty-msg">No task points added. Search and add waypoints above.</p>
+                        </div>
+
+                        <!-- Task summary -->
+                        <div id="task-summary" class="task-summary" style="display:none;">
+                            <div class="task-summary-row">
+                                <span>Total distance:</span>
+                                <strong id="task-total-distance">0 km</strong>
+                            </div>
+                            <div class="task-summary-row">
+                                <span>Legs:</span>
+                                <strong id="task-leg-count">0</strong>
+                            </div>
+                        </div>
+
+                        <!-- Export buttons -->
+                        <div class="task-export-actions">
+                            <button id="task-download-btn" class="btn btn-success" disabled>
+                                <i class="fas fa-download"></i> Download CUP
+                            </button>
+                            <button id="task-qr-btn" class="btn btn-primary" disabled>
+                                <i class="fas fa-qrcode"></i> QR Code
+                            </button>
+                            <button id="task-clear-btn" class="btn btn-danger">
+                                <i class="fas fa-trash"></i> Clear Task
+                            </button>
+                        </div>
+                    </div>
+                    <div class="task-map-area">
+                        <div id="task-map" class="map-container"></div>
+                    </div>
+                </div>
             </div>
 
             <!-- List View Tab -->
@@ -267,6 +359,91 @@
         </div>
     </div>
 
+    <!-- Task QR Modal -->
+    <div id="task-qr-modal" class="modal">
+        <div class="modal-content" style="max-width:480px;">
+            <div class="modal-header">
+                <h2>Task QR Code</h2>
+                <button class="close-btn" id="task-qr-close">&times;</button>
+            </div>
+            <div class="task-qr-body">
+                <p>Scan this QR code with your device to download the task file.</p>
+                <div id="task-qr-canvas" class="task-qr-canvas"></div>
+                <div class="task-qr-actions">
+                    <button id="task-qr-download-img" class="btn btn-secondary">
+                        <i class="fas fa-image"></i> Save QR Image
+                    </button>
+                    <button id="task-qr-download-cup" class="btn btn-success">
+                        <i class="fas fa-download"></i> Download CUP
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task Point Edit Modal -->
+    <div id="task-point-modal" class="modal">
+        <div class="modal-content" style="max-width:500px;">
+            <div class="modal-header">
+                <h2 id="task-point-modal-title">Edit Observation Zone</h2>
+                <button class="close-btn" id="task-point-modal-close">&times;</button>
+            </div>
+            <div style="padding:25px;">
+                <div class="form-group">
+                    <label for="oz-preset">Zone Preset</label>
+                    <select id="oz-preset">
+                        <option value="cylinder">Cylinder</option>
+                        <option value="fai-sector">FAI Sector (90° / 20km + 500m cylinder)</option>
+                        <option value="keyhole">BGA Keyhole (90° / 10km + 500m cylinder)</option>
+                        <option value="start-line">Start Line</option>
+                        <option value="finish-line">Finish Line</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="oz-r1">Radius R1 (m)</label>
+                        <input type="number" id="oz-r1" value="500" min="0" step="100">
+                    </div>
+                    <div class="form-group">
+                        <label for="oz-a1">Angle A1 (°)</label>
+                        <input type="number" id="oz-a1" value="180" min="0" max="180" step="1">
+                        <small>180° = full cylinder, 90° = line, 45° = FAI sector</small>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="oz-r2">Inner Radius R2 (m)</label>
+                        <input type="number" id="oz-r2" value="0" min="0" step="100">
+                    </div>
+                    <div class="form-group">
+                        <label for="oz-a2">Inner Angle A2 (°)</label>
+                        <input type="number" id="oz-a2" value="180" min="0" max="180" step="1">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="oz-direction-mode">Sector Direction</label>
+                        <select id="oz-direction-mode">
+                            <option value="auto">Auto (from task legs)</option>
+                            <option value="fixed">Fixed bearing</option>
+                        </select>
+                        <small>Auto computes direction from adjacent legs</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="oz-bearing">Bearing (°)</label>
+                        <input type="number" id="oz-bearing" value="0" min="0" max="360" step="1" disabled>
+                        <small>0° = North, 90° = East, etc.</small>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" id="oz-cancel-btn" class="btn btn-secondary">Cancel</button>
+                    <button type="button" id="oz-save-btn" class="btn btn-primary">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Loading Overlay -->
     <div id="loading-overlay" class="loading-overlay" style="display: none;">
         <div class="loading-spinner">
@@ -278,7 +455,9 @@
     <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <script src="{{ url_for('static', filename='js/icon-mapping.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/task-planner.js') }}"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>
