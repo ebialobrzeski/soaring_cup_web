@@ -1,0 +1,32 @@
+<Task type="RT">
+	<Point type="Start">
+		<Waypoint altitude="96" name="0">
+			<Location latitude="52.2692" longitude="20.907333"/>
+		</Waypoint>
+		<ObservationZone length="20000.0" type="Line"/>
+	</Point>
+	<Point type="Turn">
+		<Waypoint altitude="114" name="1">
+			<Location latitude="52.417017" longitude="21.994717"/>
+		</Waypoint>
+		<ObservationZone radius="20000" type="Keyhole"/>
+	</Point>
+	<Point type="Turn">
+		<Waypoint altitude="129" name="2">
+			<Location latitude="53.060167" longitude="19.8896"/>
+		</Waypoint>
+		<ObservationZone radius="20000" type="Keyhole"/>
+	</Point>
+	<Point type="Turn">
+		<Waypoint altitude="103" name="3">
+			<Location latitude="52.465917" longitude="21.67385"/>
+		</Waypoint>
+		<ObservationZone radius="20000" type="Keyhole"/>
+	</Point>
+	<Point type="Finish">
+		<Waypoint altitude="96" name="4">
+			<Location latitude="52.2692" longitude="20.907333"/>
+		</Waypoint>
+		<ObservationZone radius="3000.0" type="Cylinder"/>
+	</Point>
+</Task>

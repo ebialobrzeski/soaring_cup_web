@@ -181,6 +181,44 @@ header p {
     background-color: var(--secondary-hover);
 }
 
+.btn-share {
+    background-color: #0891b2;
+    color: white;
+}
+
+.btn-share:hover:not(:disabled) {
+    background-color: #0e7490;
+}
+
+/* View-mode: read-only shared task banner */
+.view-mode-banner {
+    background: #0891b2;
+    color: #fff;
+    text-align: center;
+    padding: 9px 16px;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+}
+
+.view-mode-banner a {
+    color: #fde68a;
+    text-decoration: none;
+    font-weight: 600;
+    margin-left: 4px;
+}
+
+.view-mode-banner a:hover { text-decoration: underline; }
+
+/* Hide editor chrome in view mode */
+body.view-mode .action-bar,
+body.view-mode .task-import-row,
+body.view-mode .task-wp-search-wrap,
+body.view-mode #task-clear-btn,
+body.view-mode #task-share-btn {
+    display: none !important;
+}
+
 .btn-sm {
     padding: 6px 12px;
     font-size: 12px;
@@ -1020,6 +1058,49 @@ header p {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+    align-items: flex-start;
+}
+
+/* Download dropdown */
+#task-download-dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+#task-download-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 1000;
+    min-width: 200px;
+    background: var(--bg-secondary, #fff);
+    border: 1px solid var(--border-color, #ccc);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    padding: 4px 0;
+    margin-top: 2px;
+}
+
+#task-download-menu.show {
+    display: block;
+}
+
+.dropdown-item {
+    display: block;
+    padding: 8px 14px;
+    font-size: 14px;
+    color: var(--text-primary, #333);
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.dropdown-item:hover {
+    background: var(--bg-hover, #f0f0f0);
+    color: var(--text-primary, #333);
+    text-decoration: none;
 }
 
 /* Task options panel */

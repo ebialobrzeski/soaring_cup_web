@@ -39,6 +39,13 @@ class SoaringCupEditor {
         if (window.taskPlanner) {
             window.taskPlanner.setup();
         }
+
+        // View mode: auto-switch to task tab and make task name read-only
+        if (window.VIEW_MODE) {
+            this.switchTab('task');
+            const nameInput = document.getElementById('task-name');
+            if (nameInput) nameInput.readOnly = true;
+        }
     }
 
     setupEventListeners() {

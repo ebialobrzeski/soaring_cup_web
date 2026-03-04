@@ -6,6 +6,7 @@ Converts the desktop Tkinter app to a web-based interface.
 import os
 import json
 import uuid
+import io
 import tempfile
 import logging
 from datetime import datetime
@@ -18,7 +19,7 @@ from werkzeug.utils import secure_filename
 from backend.models import Waypoint
 from backend.file_io import (
     parse_cup_file, write_cup_file, parse_csv_file, write_csv_file, get_elevation,
-    format_coordinate, write_task_cup, parse_task_cup
+    format_coordinate, write_task_cup, write_task_lkt, write_task_tsk, write_task_xctsk, parse_task_cup
 )
 from backend.config import STYLE_OPTIONS
 
@@ -133,7 +134,8 @@ def set_session_task(task_data):
 @app.route('/')
 def index():
     """Main application page."""
-    return render_template('index.html', style_options=STYLE_OPTIONS)
+    return render_template('index.html', style_options=STYLE_OPTIONS,
+                           view_mode=False, view_token='', view_task_name='')
 
 
 @app.route('/health')
@@ -419,12 +421,13 @@ def export_task():
 
 @app.route('/api/task/download', methods=['POST'])
 def download_task():
-    """Download a task as a CUP file."""
+    """Download a task in the requested format (cup, tsk, xctsk)."""
     try:
         data = request.get_json()
         task_name = data.get('name', 'Task')
         task_points = data.get('points', [])
         task_options = data.get('options', {})
+        fmt = data.get('format', 'cup').lower()
 
         if len(task_points) < 2:
             return jsonify({'success': False, 'error': 'A task needs at least 2 points'}), 400
@@ -440,18 +443,33 @@ def download_task():
 
         obs_zones = [tp.get('obsZone', {}) for tp in task_points]
 
-        content = write_task_cup(task_name, task_waypoints, obs_zones, task_options)
+        if fmt == 'tsk':
+            content = write_task_tsk(task_name, task_waypoints, obs_zones, task_options)
+            suffix = '.tsk'
+            mimetype = 'application/xml'
+        elif fmt == 'xctsk':
+            content = write_task_xctsk(task_name, task_waypoints, obs_zones, task_options)
+            suffix = '.xctsk'
+            mimetype = 'application/json'
+        elif fmt == 'lkt':
+            content = write_task_lkt(task_name, task_waypoints, obs_zones, task_options)
+            suffix = '.lkt'
+            mimetype = 'application/xml'
+        else:
+            content = write_task_cup(task_name, task_waypoints, obs_zones, task_options)
+            suffix = '.cup'
+            mimetype = 'text/plain'
 
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.cup', encoding='utf-8') as tmp_file:
+        safe_name = task_name.replace(' ', '_')
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=suffix, encoding='utf-8') as tmp_file:
             tmp_file.write(content)
             tmp_path = tmp_file.name
 
-        filename = f"{task_name.replace(' ', '_')}.cup"
         return send_file(
             tmp_path,
             as_attachment=True,
-            download_name=filename,
-            mimetype='text/plain'
+            download_name=f"{safe_name}{suffix}",
+            mimetype=mimetype
         )
     except Exception as e:
         app.logger.error(f"Task download error: {e}")
@@ -513,6 +531,126 @@ def qr_download(token):
         download_name=info['filename'],
         mimetype='text/plain'
     )
+
+
+# ──────────── XCTSK v2 helpers ────────────
+
+def _polyline_encode_num(num):
+    """Encode a single signed integer using Google's polyline algorithm."""
+    pnum = (num << 1) if num >= 0 else ~(num << 1)
+    result = []
+    while pnum > 0x1f:
+        result.append(chr(((pnum & 0x1f) | 0x20) + 63))
+        pnum >>= 5
+    result.append(chr(pnum + 63))
+    return ''.join(result)
+
+
+def _xctsk_encode_z(lon, lat, alt, radius):
+    """Encode (lon, lat, alt, radius) into XCTSK 'z' polyline field."""
+    return (_polyline_encode_num(round(lon * 1e5)) +
+            _polyline_encode_num(round(lat * 1e5)) +
+            _polyline_encode_num(round(alt)) +
+            _polyline_encode_num(round(radius)))
+
+
+def build_xctsk_payload(task_points, waypoints, no_start='', goal_is_line=False):
+    """Build XCTSK v2 JSON payload from task data."""
+    n = len(task_points)
+    turnpoints = []
+    for i, tp in enumerate(task_points):
+        idx = tp.get('waypointIndex')
+        wp = waypoints[idx]
+        oz = tp.get('obsZone', {})
+        radius = int(oz.get('r1') or oz.get('R1') or 500)
+        alt = int(wp.elevation) if wp.elevation else 0
+
+        point = {
+            'z': _xctsk_encode_z(wp.longitude, wp.latitude, alt, radius),
+            'n': wp.name or ''
+        }
+        if wp.code:
+            point['d'] = wp.code
+
+        if i == 0:
+            point['t'] = 2      # SSS
+        if i == n - 1:
+            point['t'] = 3      # ESS
+
+        oz_overrides = {}
+        is_line = oz.get('isLine') or int(oz.get('Line', 0) or 0) == 1
+        if is_line:
+            oz_overrides['l'] = 1
+        a1 = int(oz.get('a1') or oz.get('A1') or 180)
+        if a1 and a1 != 180:
+            oz_overrides['a1'] = a1
+        if oz_overrides:
+            point['o'] = oz_overrides
+
+        turnpoints.append(point)
+
+    xctsk = {
+        'taskType': 'CLASSIC',
+        'version': 2,
+        't': turnpoints,
+        's': {'g': [], 'd': 1, 't': 1},
+        'g': {'t': 1 if goal_is_line else 2}
+    }
+    if no_start:
+        xctsk['s']['g'] = [no_start + 'Z']
+    return xctsk
+
+
+@app.route('/api/task/xctsk-qr', methods=['POST'])
+def task_xctsk_qr():
+    """Generate an XCTSK v2 QR code image (PNG) for the task."""
+    try:
+        import qrcode
+        import qrcode.image.svg
+        from PIL import Image
+
+        data = request.get_json()
+        task_points = data.get('points', [])
+        no_start = data.get('noStart', '')
+
+        if len(task_points) < 2:
+            return jsonify({'success': False, 'error': 'A task needs at least 2 points'}), 400
+
+        waypoints = get_session_waypoints()
+        for tp in task_points:
+            idx = tp.get('waypointIndex')
+            if idx is None or idx < 0 or idx >= len(waypoints):
+                return jsonify({'success': False, 'error': f'Invalid waypoint index: {idx}'}), 400
+
+        last_oz = task_points[-1].get('obsZone', {})
+        goal_is_line = last_oz.get('isLine') or int(last_oz.get('Line', 0) or 0) == 1
+
+        xctsk = build_xctsk_payload(task_points, waypoints, no_start, goal_is_line)
+        xctsk_string = 'XCTSK:' + json.dumps(xctsk, ensure_ascii=False, separators=(',', ':'))
+
+        # Generate QR code as PNG, return as base64 data URL
+        qr = qrcode.QRCode(
+            version=None,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=6,
+            border=2
+        )
+        qr.add_data(xctsk_string.encode('utf-8'))
+        qr.make(fit=True)
+        img = qr.make_image(fill_color='black', back_color='white')
+
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        buf.seek(0)
+        import base64
+        img_b64 = base64.b64encode(buf.read()).decode('ascii')
+        data_url = f'data:image/png;base64,{img_b64}'
+
+        return jsonify({'success': True, 'dataUrl': data_url, 'xctskString': xctsk_string})
+    except Exception as e:
+        import traceback
+        app.logger.error(f'XCTSK QR error: {e}\n{traceback.format_exc()}')
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/task/save', methods=['POST'])
@@ -633,6 +771,219 @@ def import_task():
         app.logger.error(f"Task import error: {e}")
         app.logger.error(traceback.format_exc())
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ──────────── Task sharing ────────────
+
+SHARE_TTL_SECONDS = 24 * 3600  # share links expire after 24 hours
+
+
+def _get_base_url():
+    """Return the base URL for share links.
+
+    Uses the BASE_URL env variable when set (required behind reverse proxies).
+    Falls back to Flask's request.host_url for direct deployments.
+    """
+    base = os.environ.get('BASE_URL', '').rstrip('/')
+    return base if base else request.host_url.rstrip('/')
+
+
+def _cleanup_expired_shares():
+    """Delete share snapshots older than SHARE_TTL_SECONDS."""
+    now = datetime.now().timestamp()
+    for path in Path(DATA_FOLDER).glob('share_*.json'):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                d = json.load(f)
+            if now - d.get('created', 0) > SHARE_TTL_SECONDS:
+                path.unlink(missing_ok=True)
+        except Exception:
+            try:
+                path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
+def _build_xctsk_from_stored(task_waypoints_data, obs_zones, no_start=''):
+    """Build XCTSK v2 payload from already-resolved waypoint dicts."""
+    fake_points = [
+        {'waypointIndex': i, 'obsZone': obs_zones[i] if i < len(obs_zones) else {}}
+        for i in range(len(task_waypoints_data))
+    ]
+    waypoints_list = [Waypoint.from_dict(d) for d in task_waypoints_data]
+    last_oz = obs_zones[-1] if obs_zones else {}
+    goal_is_line = bool(last_oz.get('isLine'))
+    return build_xctsk_payload(fake_points, waypoints_list, no_start, goal_is_line)
+
+
+def _load_share(token):
+    """Load and validate a share snapshot. Returns (data, None) or (None, err_str)."""
+    if len(token) != 16 or not token.isalnum():
+        return None, 'invalid'
+    share_path = os.path.join(DATA_FOLDER, f'share_{token}.json')
+    if not os.path.exists(share_path):
+        return None, 'expired'
+    with open(share_path, 'r', encoding='utf-8') as f:
+        share_data = json.load(f)
+    if datetime.now().timestamp() - share_data.get('created', 0) > SHARE_TTL_SECONDS:
+        try:
+            os.unlink(share_path)
+        except OSError:
+            pass
+        return None, 'expired'
+    return share_data, None
+
+
+@app.route('/api/task/share', methods=['POST'])
+def create_share():
+    """Save a self-contained task snapshot and return a shareable link."""
+    try:
+        _cleanup_expired_shares()
+        data = request.get_json()
+        task_name = data.get('name', 'Task')
+        task_points = data.get('points', [])
+        task_options = data.get('options', {})
+
+        if len(task_points) < 2:
+            return jsonify({'success': False, 'error': 'A task needs at least 2 points'}), 400
+
+        waypoints = get_session_waypoints()
+        task_waypoints = []
+        for tp in task_points:
+            idx = tp.get('waypointIndex')
+            if idx is None or idx < 0 or idx >= len(waypoints):
+                return jsonify({'success': False, 'error': f'Invalid waypoint index: {idx}'}), 400
+            task_waypoints.append(waypoints[idx].to_dict())
+
+        obs_zones = [tp.get('obsZone', {}) for tp in task_points]
+        token = uuid.uuid4().hex[:16]
+        share_data = {
+            'created': datetime.now().timestamp(),
+            'task_name': task_name,
+            'task_waypoints': task_waypoints,
+            'obs_zones': obs_zones,
+            'options': task_options,
+        }
+        share_path = os.path.join(DATA_FOLDER, f'share_{token}.json')
+        with open(share_path, 'w', encoding='utf-8') as f:
+            json.dump(share_data, f, ensure_ascii=False, indent=2)
+
+        share_url = _get_base_url() + f'/share/{token}'
+        return jsonify({'success': True, 'url': share_url})
+    except Exception as e:
+        app.logger.error(f"Share create error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/share/<token>')
+def share_page(token):
+    """Render the shareable task page."""
+    try:
+        share_data, err = _load_share(token)
+        if err:
+            return render_template('share.html', expired=True, task_name='',
+                                   token=token, qr_data_url=None,
+                                   waypoint_names=[], expires_str='')
+
+        import qrcode
+        xctsk = _build_xctsk_from_stored(
+            share_data['task_waypoints'],
+            share_data['obs_zones'],
+            share_data.get('options', {}).get('noStart', '')
+        )
+        xctsk_string = 'XCTSK:' + json.dumps(xctsk, ensure_ascii=False, separators=(',', ':'))
+        qr = qrcode.QRCode(version=None,
+                           error_correction=qrcode.constants.ERROR_CORRECT_L,
+                           box_size=8, border=2)
+        qr.add_data(xctsk_string.encode('utf-8'))
+        qr.make(fit=True)
+        img = qr.make_image(fill_color='black', back_color='white')
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        buf.seek(0)
+        import base64
+        qr_data_url = 'data:image/png;base64,' + base64.b64encode(buf.read()).decode('ascii')
+
+        expires_dt = datetime.fromtimestamp(share_data['created'] + SHARE_TTL_SECONDS)
+        expires_str = expires_dt.strftime('%d %b %Y %H:%M')
+        waypoint_names = [wp['name'] for wp in share_data['task_waypoints']]
+
+        return render_template('share.html',
+                               expired=False,
+                               task_name=share_data['task_name'],
+                               token=token,
+                               qr_data_url=qr_data_url,
+                               waypoint_names=waypoint_names,
+                               expires_str=expires_str)
+    except Exception as e:
+        app.logger.error(f"Share page error {token}: {e}")
+        return 'Error loading task', 500
+
+
+@app.route('/share/<token>/taskdata')
+def share_taskdata(token):
+    """Return task data JSON for the read-only map view."""
+    try:
+        share_data, err = _load_share(token)
+        if err:
+            return jsonify({'success': False, 'error': 'expired'}), 410
+        return jsonify({
+            'success': True,
+            'task_name': share_data['task_name'],
+            'waypoints': share_data['task_waypoints'],
+            'obs_zones': share_data['obs_zones'],
+            'options': share_data.get('options', {})
+        })
+    except Exception as e:
+        app.logger.error(f"Share taskdata error {token}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/share/<token>/view')
+def share_view(token):
+    """Render the task in read-only map view inside the main editor."""
+    share_data, err = _load_share(token)
+    if err:
+        return render_template('share.html', expired=True, task_name='',
+                               token=token, qr_data_url=None,
+                               waypoint_names=[], expires_str='')
+    return render_template('index.html',
+                           style_options=STYLE_OPTIONS,
+                           view_mode=True,
+                           view_token=token,
+                           view_task_name=share_data['task_name'])
+
+
+@app.route('/share/<token>/download')
+def share_download(token):
+    """Download a task file from a share snapshot."""
+    try:
+        share_data, err = _load_share(token)
+        if err:
+            return 'Share link has expired or does not exist', 410
+
+        fmt = request.args.get('format', 'cup').lower()
+        task_name = share_data['task_name']
+        task_waypoints = [Waypoint.from_dict(d) for d in share_data['task_waypoints']]
+        obs_zones = share_data['obs_zones']
+        task_options = share_data.get('options', {})
+
+        fmt_map = {
+            'tsk': (write_task_tsk, '.tsk', 'application/xml'),
+            'xctsk': (write_task_xctsk, '.xctsk', 'application/json'),
+            'lkt': (write_task_lkt, '.lkt', 'application/xml'),
+        }
+        writer, suffix, mimetype = fmt_map.get(fmt, (write_task_cup, '.cup', 'text/plain'))
+        content = writer(task_name, task_waypoints, obs_zones, task_options)
+        safe_name = task_name.replace(' ', '_')
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=suffix, encoding='utf-8') as tmp_file:
+            tmp_file.write(content)
+            tmp_path = tmp_file.name
+        return send_file(tmp_path, as_attachment=True,
+                         download_name=f'{safe_name}{suffix}', mimetype=mimetype)
+    except Exception as e:
+        app.logger.error(f"Share download error {token}: {e}")
+        return 'Error', 500
 
 
 if __name__ == '__main__':

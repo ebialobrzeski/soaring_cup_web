@@ -1,0 +1,12 @@
+name,code,country,lat,lon,elev,style,rwdir,rwlen,freq,desc
+"Gawler",,,3435.883S,13843.333E,54m,1,,,,
+"Kapunda",,,3420.745S,13854.548E,237m,1,,,,
+"Farrell Flat",,,3349.980S,13846.020E,409m,1,,,,
+-----Related Tasks-----
+"182 km · 3 TP · Keyhole · Gawler_675988","???","Gawler","Kapunda","Farrell Flat","Kapunda","Gawler","???"
+Options
+ObsZone=0,Style=2,R1=10000m,A1=180,Line=1
+ObsZone=1,Style=1,R1=20000m,A1=45,R2=500m,A2=180
+ObsZone=2,Style=1,R1=20000m,A1=45,R2=500m,A2=180
+ObsZone=3,Style=1,R1=20000m,A1=45,R2=500m,A2=180
+ObsZone=4,Style=3,R1=3000m,A1=180

@@ -436,6 +436,183 @@ def write_task_cup(task_name, task_waypoints, obs_zones, options=None):
     return '\n'.join(lines) + '\n'
 
 
+def write_task_lkt(task_name, task_waypoints, obs_zones, options=None):
+    """
+    Generate an LK8000 .lkt XML file string.
+
+    The LKT "Default" format uses global start/finish/sector OZ types
+    (not per-turnpoint). Start OZ is taken from the first point, finish
+    from the last, and sector from the first intermediate point.
+
+    Args:
+        task_name: Name of the task
+        task_waypoints: list of Waypoint objects
+        obs_zones: list of dicts with ObsZone fields
+        options: dict (unused, reserved for future)
+
+    Returns:
+        str: LK8000 LKT XML content
+    """
+    def oz_type(oz):
+        is_line = oz.get('isLine', False)
+        a1 = float(oz.get('a1', 180))
+        if is_line:
+            return 'line'
+        elif int(a1) == 180:
+            return 'circle'
+        else:
+            return 'sector'
+
+    def oz_radius(oz):
+        r1 = oz.get('r1', 500)
+        return int(float(str(r1).replace('m', '')))
+
+    n = len(task_waypoints)
+    start_oz = obs_zones[0]
+    finish_oz = obs_zones[-1]
+    # Use first intermediate (or start if no intermediate) as sector template
+    sector_oz = obs_zones[1] if n > 2 else obs_zones[0]
+
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>']
+    lines.append(f'<lk-task type="Default">')
+    lines.append(f'\t<options auto-advance="Auto">')
+    lines.append(f'\t\t<start type="{oz_type(start_oz)}" radius="{oz_radius(start_oz)}"/>')
+    lines.append(f'\t\t<finish type="{oz_type(finish_oz)}" Radius="{oz_radius(finish_oz)}"/>')
+    lines.append(f'\t\t<sector type="{oz_type(sector_oz)}" Radius="{oz_radius(sector_oz)}"/>')
+    lines.append('\t\t<rules>')
+    lines.append('\t\t\t<finish fai-height="false" min-height="0"/>')
+    lines.append('\t\t\t<start max-height="0" max-height-margin="0" max-speed="0" max-speed-margin="0" height-ref="AGL"/>')
+    lines.append('\t\t</rules>')
+    lines.append('\t</options>')
+
+    lines.append('\t<taskpoints>')
+    for i, wp in enumerate(task_waypoints):
+        lines.append(f'\t\t<point idx="{i}" name="{wp.name}"/>')
+    lines.append('\t</taskpoints>')
+
+    # Deduplicate waypoints by name while preserving order
+    seen = set()
+    unique_wps = []
+    for wp in task_waypoints:
+        if wp.name not in seen:
+            seen.add(wp.name)
+            unique_wps.append(wp)
+
+    lines.append('\t<waypoints>')
+    for wp in unique_wps:
+        alt = float(wp.elevation) if wp.elevation else 0.0
+        code = wp.code or wp.name
+        country = wp.country or ''
+        style = int(wp.style) if wp.style else 1
+        lines.append(
+            f'\t\t<point name="{wp.name}" latitude="{wp.latitude:.6f}"'
+            f' longitude="{wp.longitude:.6f}" altitude="{alt:.6f}"'
+            f' flags="2" code="{code}" format="2" country="{country}" style="{style}"/>'
+        )
+    lines.append('\t</waypoints>')
+    lines.append('</lk-task>')
+    return '\n'.join(lines) + '\n'
+
+
+def write_task_tsk(task_name, task_waypoints, obs_zones, options=None):
+    """
+    Generate an XCSoar .tsk XML file string.
+
+    Args:
+        task_name: Name of the task
+        task_waypoints: list of Waypoint objects
+        obs_zones: list of dicts with ObsZone fields
+        options: dict (unused, reserved for future)
+
+    Returns:
+        str: XCSoar TSK XML content
+    """
+    def oz_xml(oz, indent='    '):
+        r1 = int(float(str(oz.get('r1', 500)).replace('m', '')))
+        a1 = float(oz.get('a1', 180))
+        r2 = int(float(str(oz.get('r2', 0)).replace('m', '')))
+        is_line = oz.get('isLine', False)
+        if is_line:
+            return f'{indent}<ObservationZone length="{r1 * 2}.0" type="Line"/>'
+        elif int(a1) == 180 and r2 == 0:
+            return f'{indent}<ObservationZone radius="{r1}" type="Cylinder"/>'
+        elif r1 == 3000 and int(a1) == 45 and r2 == 500:
+            return f'{indent}<ObservationZone type="FAISector"/>'
+        elif r1 == 10000 and int(a1) == 45 and r2 == 500:
+            return f'{indent}<ObservationZone radius="{r1}" type="Keyhole"/>'
+        elif r2 > 0:
+            return f'{indent}<ObservationZone angle="{int(a1 * 2)}" inner_radius="{r2}" radius="{r1}" type="CustomKeyhole"/>'
+        else:
+            return f'{indent}<ObservationZone angle="{int(a1 * 2)}" radius="{r1}" type="SymmetricQuadrant"/>'
+
+    n = len(task_waypoints)
+    lines = ['<?xml version="1.0" encoding="utf-8"?>']
+    lines.append(f'<Task created="" modified="" name="{task_name}" type="RT">')
+    for i, (wp, oz) in enumerate(zip(task_waypoints, obs_zones)):
+        if i == 0:
+            pt = 'Start'
+        elif i == n - 1:
+            pt = 'Finish'
+        else:
+            pt = 'Turn'
+        lines.append(f'  <Point type="{pt}">')
+        alt = int(float(wp.elevation)) if wp.elevation else 0
+        lines.append(f'    <Waypoint altitude="{alt}" name="{wp.name}">')
+        lines.append(f'      <Location latitude="{wp.latitude}" longitude="{wp.longitude}"/>')
+        lines.append(f'    </Waypoint>')
+        lines.append(oz_xml(oz))
+        lines.append('  </Point>')
+    lines.append('</Task>')
+    return '\n'.join(lines) + '\n'
+
+
+def write_task_xctsk(task_name, task_waypoints, obs_zones, options=None):
+    """
+    Generate an XCTrack .xctsk JSON v1 file string.
+
+    Args:
+        task_name: Name of the task
+        task_waypoints: list of Waypoint objects
+        obs_zones: list of dicts with ObsZone fields
+        options: dict (unused, reserved for future)
+
+    Returns:
+        str: XCTSK v1 JSON content
+    """
+    import json
+    n = len(task_waypoints)
+    turnpoints = []
+    for i, (wp, oz) in enumerate(zip(task_waypoints, obs_zones)):
+        r1 = int(float(str(oz.get('r1', 500)).replace('m', '')))
+        tp = {
+            'radius': r1,
+            'waypoint': {
+                'name': wp.name,
+                'description': wp.code or '',
+                'lat': wp.latitude,
+                'lon': wp.longitude,
+                'altSmoothed': int(float(wp.elevation)) if wp.elevation else 0
+            }
+        }
+        if i == 0:
+            tp['type'] = 'SSS'
+        elif i == n - 1:
+            tp['type'] = 'ESS'
+        turnpoints.append(tp)
+
+    last_oz = obs_zones[-1]
+    goal_type = 'LINE' if last_oz.get('isLine') else 'CYLINDER'
+
+    xctsk = {
+        'taskType': 'CLASSIC',
+        'version': 1,
+        'turnpoints': turnpoints,
+        'sss': {'type': 'RACE', 'direction': 'EXIT', 'timeGates': []},
+        'goal': {'type': goal_type}
+    }
+    return json.dumps(xctsk, ensure_ascii=False, indent=2)
+
+
 def parse_task_cup(content):
     """
     Parse a CUP file containing a task section.

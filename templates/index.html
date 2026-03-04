@@ -10,7 +10,19 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
-<body>
+<body{% if view_mode %} class="view-mode"{% endif %}>
+    {% if view_mode %}
+    <div class="view-mode-banner">
+        <i class="fas fa-eye"></i>
+        Read-only view &mdash; <strong>{{ view_task_name }}</strong>
+        &nbsp;&middot;&nbsp;
+        <a href="/"><i class="fas fa-edit"></i> Open Editor</a>
+    </div>
+    {% endif %}
+    <script>
+        window.VIEW_MODE = {{ view_mode | tojson }};
+        window.VIEW_TOKEN = {{ view_token | tojson }};
+    </script>
     <div class="container">
         <div class="header-row">
             <div class="header-spacer"></div>
@@ -50,13 +62,15 @@
 
         <!-- Tab Navigation -->
         <div class="tab-nav">
+            {% if not view_mode %}
             <button class="tab-btn active" data-tab="map">
                 <i class="fas fa-map"></i> Map View
             </button>
             <button class="tab-btn" data-tab="list">
                 <i class="fas fa-list"></i> List View
             </button>
-            <button class="tab-btn" data-tab="task">
+            {% endif %}
+            <button class="tab-btn{% if view_mode %} active{% endif %}" data-tab="task">
                 <i class="fas fa-route"></i> Task Planner
             </button>
         </div>
@@ -64,7 +78,7 @@
         <!-- Tab Content -->
         <div class="tab-content">
             <!-- Map View Tab -->
-            <div id="map-tab" class="tab-pane active">
+            <div id="map-tab" class="tab-pane{% if not view_mode %} active{% endif %}">
                 <div class="map-controls">
                     <button id="fit-bounds-btn" class="btn btn-secondary">
                         <i class="fas fa-expand-arrows-alt"></i> Fit All
@@ -80,7 +94,7 @@
             </div>
 
             <!-- Task Planner Tab -->
-            <div id="task-tab" class="tab-pane">
+            <div id="task-tab" class="tab-pane{% if view_mode %} active{% endif %}">
                 <div class="task-planner">
                     <div class="task-sidebar">
                         <h3><i class="fas fa-route"></i> Task Definition</h3>
@@ -142,11 +156,23 @@
 
                         <!-- Export buttons -->
                         <div class="task-export-actions">
-                            <button id="task-download-btn" class="btn btn-success" disabled>
-                                <i class="fas fa-download"></i> Download CUP
-                            </button>
+                            <div class="dropdown" id="task-download-dropdown">
+                                <button id="task-download-btn" class="btn btn-success dropdown-toggle" disabled
+                                        aria-haspopup="true" aria-expanded="false">
+                                    <i class="fas fa-download"></i> Download
+                                </button>
+                                <div class="dropdown-menu" id="task-download-menu">
+                                    <a class="dropdown-item" href="#" onclick="window.taskPlanner.downloadTask('cup'); return false;">SeeYou CUP (.cup)</a>
+                                    <a class="dropdown-item" href="#" onclick="window.taskPlanner.downloadTask('tsk'); return false;">XCSoar TSK (.tsk)</a>
+                                    <a class="dropdown-item" href="#" onclick="window.taskPlanner.downloadTask('lkt'); return false;">LK8000 LKT (.lkt)</a>
+                                    <a class="dropdown-item" href="#" onclick="window.taskPlanner.downloadTask('xctsk'); return false;">XCTrack XCTSK (.xctsk)</a>
+                                </div>
+                            </div>
                             <button id="task-qr-btn" class="btn btn-primary" disabled>
-                                <i class="fas fa-qrcode"></i> QR Code
+                                <i class="fas fa-qrcode"></i> XCTSK QR
+                            </button>
+                            <button id="task-share-btn" class="btn btn-share" disabled>
+                                <i class="fas fa-share-alt"></i> Share
                             </button>
                             <button id="task-clear-btn" class="btn btn-danger">
                                 <i class="fas fa-trash"></i> Clear Task
@@ -363,11 +389,11 @@
     <div id="task-qr-modal" class="modal">
         <div class="modal-content" style="max-width:480px;">
             <div class="modal-header">
-                <h2>Task QR Code</h2>
+                <h2>Task QR Code (XCTSK)</h2>
                 <button class="close-btn" id="task-qr-close">&times;</button>
             </div>
             <div class="task-qr-body">
-                <p>Scan this QR code with your device to download the task file.</p>
+                <p>Scan with <strong>XCTrack</strong>, <strong>XCSoar</strong>, <strong>LK8000</strong>, or <strong>SeeYou Navigator</strong> to load the task directly.</p>
                 <div id="task-qr-canvas" class="task-qr-canvas"></div>
                 <div class="task-qr-actions">
                     <button id="task-qr-download-img" class="btn btn-secondary">
@@ -376,6 +402,34 @@
                     <button id="task-qr-download-cup" class="btn btn-success">
                         <i class="fas fa-download"></i> Download CUP
                     </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Share Modal -->
+    <div id="share-modal" class="modal">
+        <div class="modal-content" style="max-width:460px;">
+            <div class="modal-header">
+                <h2><i class="fas fa-share-alt"></i> Share Task Link</h2>
+                <button class="close-btn" id="share-modal-close">&times;</button>
+            </div>
+            <div style="padding:24px;">
+                <p style="margin-bottom:16px; color:var(--text-secondary); font-size:14px; line-height:1.5;">
+                    <i class="fas fa-clock"></i>&nbsp; This link expires in <strong>24 hours</strong>.
+                    Anyone with it can view the QR code and download the task file.
+                </p>
+                <div class="input-group" style="margin-bottom:16px;">
+                    <input type="text" id="share-url-input" readonly
+                           style="font-size:13px; background:var(--background);">
+                    <button id="share-copy-btn" class="btn btn-primary" style="white-space:nowrap;">
+                        <i class="fas fa-copy"></i> Copy
+                    </button>
+                </div>
+                <div style="text-align:center;">
+                    <a id="share-open-link" href="#" target="_blank" rel="noopener" class="btn btn-secondary">
+                        <i class="fas fa-external-link-alt"></i> Open Link
+                    </a>
                 </div>
             </div>
         </div>
@@ -455,7 +509,6 @@
     <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <script src="{{ url_for('static', filename='js/icon-mapping.js') }}"></script>
     <script src="{{ url_for('static', filename='js/task-planner.js') }}"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>

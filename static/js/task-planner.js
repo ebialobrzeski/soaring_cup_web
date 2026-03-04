@@ -34,6 +34,7 @@ class TaskPlanner {
     initMap() {
         if (this.initialized) {
             this.map.invalidateSize();
+            setTimeout(() => this.fitTaskBounds(), 150);
             return;
         }
 
@@ -73,8 +74,38 @@ class TaskPlanner {
         });
 
         // Buttons
-        document.getElementById('task-download-btn').addEventListener('click', () => this.downloadTask());
+        document.getElementById('task-download-btn').addEventListener('click', () => {
+            const menu = document.getElementById('task-download-menu');
+            const expanded = menu.classList.toggle('show');
+            document.getElementById('task-download-btn').setAttribute('aria-expanded', expanded);
+        });
+        document.addEventListener('click', (e) => {
+            if (!document.getElementById('task-download-dropdown').contains(e.target)) {
+                document.getElementById('task-download-menu').classList.remove('show');
+                document.getElementById('task-download-btn').setAttribute('aria-expanded', 'false');
+            }
+        });
         document.getElementById('task-qr-btn').addEventListener('click', () => this.showQR());
+        document.getElementById('task-share-btn').addEventListener('click', () => this.shareTask());
+        document.getElementById('share-modal-close').addEventListener('click', () => {
+            document.getElementById('share-modal').classList.remove('show');
+        });
+        document.getElementById('share-copy-btn').addEventListener('click', () => {
+            const input = document.getElementById('share-url-input');
+            navigator.clipboard.writeText(input.value).then(() => {
+                const btn = document.getElementById('share-copy-btn');
+                const orig = btn.innerHTML;
+                btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+                btn.classList.replace('btn-primary', 'btn-success');
+                setTimeout(() => {
+                    btn.innerHTML = orig;
+                    btn.classList.replace('btn-success', 'btn-primary');
+                }, 2000);
+            }).catch(() => {
+                document.getElementById('share-url-input').select();
+                document.execCommand('copy');
+            });
+        });
         document.getElementById('task-clear-btn').addEventListener('click', () => this.clearTask());
 
         // OZ modal
@@ -261,6 +292,7 @@ class TaskPlanner {
             }
 
             this.refreshUI();
+            setTimeout(() => this.fitTaskBounds(), 50);
 
             if (unmatched.length > 0) {
                 alert('Some waypoints could not be matched:\n' + unmatched.join('\n') +
@@ -370,10 +402,11 @@ class TaskPlanner {
         }
         this.updateSummary();
         this.updateButtons();
-        this.saveTaskState();
+        if (!window.VIEW_MODE) this.saveTaskState();
     }
 
     renderPointsList() {
+        const viewMode = window.VIEW_MODE;
         const container = document.getElementById('task-points-list');
         if (this.taskPoints.length === 0) {
             container.innerHTML = '<p class="task-empty-msg">No task points added. Search and add waypoints above.</p>';
@@ -392,7 +425,7 @@ class TaskPlanner {
                     <span class="task-point-oz">${presetName} · R1=${tp.obsZone.r1}m</span>
                     ${idx > 0 ? `<span class="task-point-dist">${this.legDistance(idx)} km</span>` : ''}
                 </div>
-                <div class="task-point-actions">
+                ${viewMode ? '' : `<div class="task-point-actions">
                     <button class="btn btn-sm btn-secondary" title="Move up" onclick="window.taskPlanner.movePoint(${idx},-1)" ${idx === 0 ? 'disabled' : ''}>
                         <i class="fas fa-arrow-up"></i>
                     </button>
@@ -405,7 +438,7 @@ class TaskPlanner {
                     <button class="btn btn-sm btn-danger" title="Remove" onclick="window.taskPlanner.removePoint(${idx})">
                         <i class="fas fa-times"></i>
                     </button>
-                </div>
+                </div>`}
             </div>`;
         }).join('');
     }
@@ -472,10 +505,15 @@ class TaskPlanner {
             // Click on task point marker → popup with edit/delete/bearing actions
             marker.on('click', () => this.showTaskPointPopup(latlng, idx));
         });
+    }
 
-        // Fit bounds
-        const group = L.featureGroup([this.taskLayer, this.markerLayer]);
-        this.map.fitBounds(group.getBounds().pad(0.15));
+    fitTaskBounds() {
+        if (!this.initialized || this.taskPoints.length === 0) return;
+        const latlngs = this.taskPoints.map(tp => [tp.waypoint.latitude, tp.waypoint.longitude]);
+        const bounds = L.latLngBounds(latlngs);
+        if (bounds.isValid()) {
+            this.map.fitBounds(bounds.pad(0.2));
+        }
     }
 
     renderWaypointMarkers() {
@@ -834,6 +872,9 @@ class TaskPlanner {
         const has = this.taskPoints.length >= 2;
         document.getElementById('task-download-btn').disabled = !has;
         document.getElementById('task-qr-btn').disabled = !has;
+        if (!window.VIEW_MODE) {
+            document.getElementById('task-share-btn').disabled = !has;
+        }
     }
 
     // ──────────── Build task payload ────────────
@@ -854,8 +895,15 @@ class TaskPlanner {
 
     // ──────────── Export: download ────────────
 
-    async downloadTask() {
+    async downloadTask(format = 'cup') {
+        // Close dropdown
+        document.getElementById('task-download-menu').classList.remove('show');
+        document.getElementById('task-download-btn').setAttribute('aria-expanded', 'false');
+
         const payload = this.buildPayload();
+        payload.format = format;
+        const extMap = { cup: '.cup', tsk: '.tsk', xctsk: '.xctsk', lkt: '.lkt' };
+        const ext = extMap[format] || '.cup';
         try {
             const resp = await fetch('/api/task/download', {
                 method: 'POST',
@@ -871,7 +919,7 @@ class TaskPlanner {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = (payload.name.replace(/\s+/g, '_') || 'task') + '.cup';
+            a.download = (payload.name.replace(/\s+/g, '_') || 'task') + ext;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -881,51 +929,171 @@ class TaskPlanner {
         }
     }
 
-    // ──────────── Export: QR code ────────────
-
-    async showQR() {
-        if (typeof QRCode === 'undefined') {
-            alert('QR code library failed to load. Please check your internet connection and reload the page.');
-            return;
-        }
+    async shareTask() {
         const payload = this.buildPayload();
         try {
-            const resp = await fetch('/api/task/qr', {
+            const resp = await fetch('/api/task/share', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
-            const result = await resp.json();
-            if (!result.success) {
-                alert('Export failed: ' + (result.error || 'Unknown error'));
+            const data = await resp.json();
+            if (!data.success) {
+                alert('Share failed: ' + (data.error || 'Unknown error'));
                 return;
             }
-
-            // Build a download URL from the token
-            const downloadUrl = `${window.location.origin}/dl/${result.token}`;
-
-            const canvas = document.getElementById('task-qr-canvas');
-            canvas.innerHTML = '';
-
-            const qrDiv = document.createElement('div');
-            canvas.appendChild(qrDiv);
-            new QRCode(qrDiv, {
-                text: downloadUrl,
-                width: 360,
-                height: 360,
-                correctLevel: QRCode.CorrectLevel.M
-            });
-
-            // Show the download link below the QR
-            const linkP = document.createElement('p');
-            linkP.style.cssText = 'text-align:center;margin-top:12px;word-break:break-all;font-size:0.85rem;';
-            linkP.innerHTML = `<a href="${this.escapeHtml(downloadUrl)}" target="_blank">${this.escapeHtml(downloadUrl)}</a>`;
-            canvas.appendChild(linkP);
-
-            document.getElementById('task-qr-modal').classList.add('show');
+            document.getElementById('share-url-input').value = data.url;
+            document.getElementById('share-open-link').href = data.url;
+            document.getElementById('share-modal').classList.add('show');
         } catch (e) {
-            alert('Export failed: ' + e.message);
+            alert('Share failed: ' + e.message);
         }
+    }
+
+    // ──────────── XCTSK v2 polyline encoding ────────────
+
+    /**
+     * Encode a single signed integer using Google's polyline algorithm.
+     * @see https://developers.google.com/maps/documentation/utilities/polylinealgorithm
+     */
+    _encodePolylineNum(num) {
+        let pnum = num << 1;
+        if (num < 0) pnum = ~pnum;
+        let result = '';
+        if (pnum === 0) {
+            result = String.fromCharCode(63);
+        } else {
+            while (pnum > 0x1f) {
+                result += String.fromCharCode(((pnum & 0x1f) | 0x20) + 63);
+                pnum >>>= 5;
+            }
+            result += String.fromCharCode(63 + pnum);
+        }
+        return result;
+    }
+
+    /**
+     * Encode turnpoint coordinates + altitude + radius into XCTSK "z" field.
+     * Order: longitude, latitude, altitude (m), radius (m)
+     * @see https://xctrack.org/Competition_Interfaces.html
+     */
+    _encodeXctskZ(lon, lat, alt, radius) {
+        return this._encodePolylineNum(Math.round(lon * 1e5)) +
+               this._encodePolylineNum(Math.round(lat * 1e5)) +
+               this._encodePolylineNum(Math.round(alt)) +
+               this._encodePolylineNum(Math.round(radius));
+    }
+
+    /**
+     * Build XCTSK v2 JSON object from current task state.
+     * @see https://xctrack.org/Competition_Interfaces.html#task-definition-format-2---for-qr-codes
+     */
+    buildXctskPayload() {
+        const n = this.taskPoints.length;
+        if (n < 2) return null;
+
+        const turnpoints = this.taskPoints.map((tp, i) => {
+            const wp = tp.waypoint;
+            const oz = tp.obsZone || {};
+            const radius = parseInt(oz.r1) || 500;   // lowercase field names from addPoint/saveOZ
+            const alt = parseInt(wp.elevation) || 0;
+
+            const point = {
+                z: this._encodeXctskZ(wp.longitude, wp.latitude, alt, radius),
+                n: wp.name || ''
+            };
+
+            // d: description/code — omit if empty to keep QR compact
+            if (wp.code) point.d = wp.code;
+
+            // t: 2 = SSS (start), 3 = ESS (finish/last point)
+            if (i === 0) point.t = 2;
+            if (i === n - 1) point.t = 3;
+
+            // o: observation zone overrides (only non-default values)
+            const ozOverrides = {};
+            if (oz.isLine) {           // isLine field from addPoint/saveOZ
+                ozOverrides.l = 1;
+            }
+            const a1 = parseInt(oz.a1); // lowercase a1
+            if (a1 && a1 !== 180) {
+                ozOverrides.a1 = a1;
+            }
+            if (Object.keys(ozOverrides).length > 0) {
+                point.o = ozOverrides;
+            }
+
+            return point;
+        });
+
+        // Determine goal type from last point's OZ
+        const lastOz = this.taskPoints[n - 1].obsZone || {};
+        const goalIsLine = !!lastOz.isLine;
+
+        const xctsk = {
+            taskType: 'CLASSIC',
+            version: 2,
+            t: turnpoints,
+            s: { g: [], d: 1, t: 1 },                          // start: RACE, ENTRY direction (legacy)
+            g: { t: goalIsLine ? 1 : 2 }                       // goal: 1=LINE, 2=CYLINDER
+        };
+
+        // Add start time gate if set
+        const noStart = document.getElementById('task-no-start').value;
+        if (noStart) {
+            xctsk.s.g = [noStart + ':00Z'];
+        }
+
+        return xctsk;
+    }
+
+    // ──────────── Export: QR code ────────────
+
+    showQR() {
+        const xctsk = this.buildXctskPayload();
+        if (!xctsk) {
+            alert('A task needs at least 2 points.');
+            return;
+        }
+
+        const container = document.getElementById('task-qr-canvas');
+        container.innerHTML = '<p style="text-align:center;padding:20px;">Generating QR code…</p>';
+        document.getElementById('task-qr-modal').classList.add('show');
+
+        const payload = {
+            points: this.taskPoints.map(tp => ({
+                waypointIndex: tp.waypointIndex,
+                obsZone: tp.obsZone
+            })),
+            noStart: (document.getElementById('task-no-start').value || '') + ':00'
+        };
+
+        fetch('/api/task/xctsk-qr', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(r => r.json())
+        .then(result => {
+            container.innerHTML = '';
+            if (!result.success) {
+                container.innerHTML = `<p style="color:red;text-align:center;">QR generation failed: ${this.escapeHtml(result.error)}</p>`;
+                return;
+            }
+            const img = document.createElement('img');
+            img.src = result.dataUrl;
+            img.style.cssText = 'display:block;margin:0 auto;max-width:360px;width:100%;';
+            img.alt = 'XCTSK QR Code';
+            container.appendChild(img);
+
+            const infoP = document.createElement('p');
+            infoP.style.cssText = 'text-align:center;margin-top:12px;font-size:0.85rem;color:#666;';
+            infoP.textContent = `XCTSK task: ${this.taskPoints.length} points, ${this.totalDistance()} km`;
+            container.appendChild(infoP);
+        })
+        .catch(e => {
+            container.innerHTML = `<p style="color:red;text-align:center;">QR generation failed: ${this.escapeHtml(e.message)}</p>`;
+        });
     }
 
     hideQRModal() {
@@ -933,11 +1101,11 @@ class TaskPlanner {
     }
 
     downloadQRImage() {
-        const canvas = document.querySelector('#task-qr-canvas canvas');
-        if (!canvas) return;
+        const img = document.querySelector('#task-qr-canvas img');
+        if (!img) return;
         const a = document.createElement('a');
         a.download = (document.getElementById('task-name').value || 'task') + '_qr.png';
-        a.href = canvas.toDataURL('image/png');
+        a.href = img.src;
         a.click();
     }
 
@@ -961,6 +1129,37 @@ class TaskPlanner {
     }
 
     async loadTaskState() {
+        // View mode: load task from the share snapshot instead of the user session
+        if (window.VIEW_MODE && window.VIEW_TOKEN) {
+            try {
+                const resp = await fetch(`/share/${encodeURIComponent(window.VIEW_TOKEN)}/taskdata`);
+                const data = await resp.json();
+                if (!data.success) return;
+
+                // Inject waypoints into app so addPoint/renderMap can use them
+                if (window.app) {
+                    window.app.waypoints = data.waypoints;
+                }
+
+                // Restore task name
+                if (data.task_name) document.getElementById('task-name').value = data.task_name;
+
+                this.taskPoints = data.waypoints.map((wp, i) => ({
+                    waypointIndex: i,
+                    waypoint: wp,
+                    obsZone: data.obs_zones[i] || { style: 1, r1: 3000, a1: 45, r2: 500, a2: 180, a12: 0, isLine: false, move: true, reduce: false, directionMode: 'auto', fixedBearing: null }
+                }));
+
+                if (this.taskPoints.length > 0) {
+                    this.refreshUI();
+                    setTimeout(() => this.fitTaskBounds(), 50);
+                }
+            } catch (e) {
+                // Silently ignore
+            }
+            return;
+        }
+
         try {
             const resp = await fetch('/api/task/load');
             const result = await resp.json();
@@ -989,6 +1188,7 @@ class TaskPlanner {
 
             if (this.taskPoints.length > 0) {
                 this.refreshUI();
+                setTimeout(() => this.fitTaskBounds(), 50);
             }
         } catch (e) {
             // Ignore load errors silently

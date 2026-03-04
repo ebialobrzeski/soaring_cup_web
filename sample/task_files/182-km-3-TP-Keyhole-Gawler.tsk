@@ -1,0 +1,32 @@
+<Task type="RT">
+	<Point type="Start">
+		<Waypoint altitude="54" name="Gawler">
+			<Location latitude="-34.598056" longitude="138.722222"/>
+		</Waypoint>
+		<ObservationZone length="20000.0" type="Line"/>
+	</Point>
+	<Point type="Turn">
+		<Waypoint altitude="237" name="Kapunda">
+			<Location latitude="-34.34575" longitude="138.909133"/>
+		</Waypoint>
+		<ObservationZone radius="20000" type="Keyhole"/>
+	</Point>
+	<Point type="Turn">
+		<Waypoint altitude="409" name="Farrell Flat">
+			<Location latitude="-33.833" longitude="138.767"/>
+		</Waypoint>
+		<ObservationZone radius="20000" type="Keyhole"/>
+	</Point>
+	<Point type="Turn">
+		<Waypoint altitude="237" name="Kapunda">
+			<Location latitude="-34.34575" longitude="138.909133"/>
+		</Waypoint>
+		<ObservationZone radius="20000" type="Keyhole"/>
+	</Point>
+	<Point type="Finish">
+		<Waypoint altitude="54" name="Gawler">
+			<Location latitude="-34.598056" longitude="138.722222"/>
+		</Waypoint>
+		<ObservationZone radius="3000.0" type="Cylinder"/>
+	</Point>
+</Task>
