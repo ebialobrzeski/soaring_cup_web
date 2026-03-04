@@ -27,6 +27,9 @@ from backend.config import STYLE_OPTIONS
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'soaring_cup_editor_secret_key_change_in_production')
+if app.secret_key == 'soaring_cup_editor_secret_key_change_in_production':
+    import warnings
+    warnings.warn('SECRET_KEY is set to the default insecure value. Set the SECRET_KEY environment variable in production.', stacklevel=1)
 CORS(app)
 
 # Configuration
@@ -343,35 +346,23 @@ def download_file(file_format):
         waypoints = get_session_waypoints()
         if not waypoints:
             return jsonify({'success': False, 'error': 'No waypoints to download'}), 400
-        
-        # Only support CUP format
+
         if file_format.lower() != 'cup':
             return jsonify({'success': False, 'error': 'Only CUP format is supported.'}), 400
-        
-        # Create temporary file
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.cup', encoding='utf-8') as tmp_file:
-            tmp_path = tmp_file.name
-        
-        # Get CUP content as string and write to file
+
         content = write_cup_file(waypoints)
-        with open(tmp_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-        
         filename = session.get('current_filename', 'waypoints.cup')
         if not filename.endswith('.cup'):
             filename = 'waypoints.cup'
-        
-        return send_file(
-            tmp_path,
-            as_attachment=True,
-            download_name=filename,
-            mimetype='text/plain'
+
+        from flask import Response
+        return Response(
+            content.encode('utf-8'),
+            mimetype='text/plain',
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
         )
-        
     except Exception as e:
         app.logger.error(f"Download error: {e}")
-        import traceback
-        app.logger.error(traceback.format_exc())
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -466,16 +457,12 @@ def download_task():
             suffix = '.cup'
             mimetype = 'text/plain'
 
-        safe_name = task_name.replace(' ', '_')
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=suffix, encoding='utf-8') as tmp_file:
-            tmp_file.write(content)
-            tmp_path = tmp_file.name
-
-        return send_file(
-            tmp_path,
-            as_attachment=True,
-            download_name=f"{safe_name}{suffix}",
-            mimetype=mimetype
+        safe_name = task_name.replace(' ', '_')[:TASK_NAME_MAX_LEN]
+        from flask import Response
+        return Response(
+            content.encode('utf-8'),
+            mimetype=mimetype,
+            headers={'Content-Disposition': f'attachment; filename="{safe_name}{suffix}"'}
         )
     except Exception as e:
         app.logger.error(f"Task download error: {e}")
@@ -517,7 +504,7 @@ def task_qr():
         with open(tmp_path, 'w', encoding='utf-8') as f:
             f.write(content)
 
-        _qr_downloads[token] = {'path': tmp_path, 'filename': filename}
+        _qr_downloads[token] = {'path': tmp_path, 'filename': filename, 'created': datetime.now().timestamp()}
 
         return jsonify({'success': True, 'token': token})
     except Exception as e:
@@ -781,7 +768,13 @@ def import_task():
 
 # ──────────── Task sharing ────────────
 
-SHARE_TTL_SECONDS = 24 * 3600  # share links expire after 24 hours
+SHARE_TTL_SECONDS = 24 * 3600       # share links expire after 24 hours
+SHARE_MAX_PER_SESSION = 5           # max active (non-expired) shares per session
+SHARE_MIN_INTERVAL_SECONDS = 15     # minimum seconds between share creations
+QR_TTL_SECONDS = 3600               # QR download files expire after 1 hour
+SESSION_FILE_TTL_SECONDS = 7 * 24 * 3600  # stale session files cleaned after 7 days
+TASK_NAME_MAX_LEN = 100             # maximum task name length
+TASK_MAX_POINTS = 50                # maximum task waypoints
 
 
 def _get_base_url():
@@ -795,8 +788,9 @@ def _get_base_url():
 
 
 def _cleanup_expired_shares():
-    """Delete share snapshots older than SHARE_TTL_SECONDS."""
+    """Delete expired share/QR files and stale session data files."""
     now = datetime.now().timestamp()
+    # Expired share snapshots
     for path in Path(DATA_FOLDER).glob('share_*.json'):
         try:
             with open(path, 'r', encoding='utf-8') as f:
@@ -808,6 +802,37 @@ def _cleanup_expired_shares():
                 path.unlink(missing_ok=True)
             except Exception:
                 pass
+    # Expired QR download files
+    expired_tokens = [t for t, v in list(_qr_downloads.items())
+                      if now - v.get('created', 0) > QR_TTL_SECONDS]
+    for t in expired_tokens:
+        info = _qr_downloads.pop(t, None)
+        if info:
+            try:
+                os.unlink(info['path'])
+            except OSError:
+                pass
+    # Stale session data files (untouched for 7 days)
+    for path in Path(DATA_FOLDER).glob('session_*.json'):
+        try:
+            if now - path.stat().st_mtime > SESSION_FILE_TTL_SECONDS:
+                path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def _count_active_shares_for_session(session_id, now_ts):
+    """Count non-expired share files belonging to this session."""
+    count = 0
+    for path in Path(DATA_FOLDER).glob('share_*.json'):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                d = json.load(f)
+            if d.get('session_id') == session_id and now_ts - d.get('created', 0) <= SHARE_TTL_SECONDS:
+                count += 1
+        except Exception:
+            pass
+    return count
 
 
 def _build_xctsk_from_stored(task_waypoints_data, obs_zones, no_start=''):
@@ -845,13 +870,31 @@ def create_share():
     """Save a self-contained task snapshot and return a shareable link."""
     try:
         _cleanup_expired_shares()
+        now_ts = datetime.now().timestamp()
+
+        # Rate limit: enforce minimum interval between share creations per session
+        last_share_ts = session.get('_last_share_ts', 0)
+        if now_ts - last_share_ts < SHARE_MIN_INTERVAL_SECONDS:
+            wait = int(SHARE_MIN_INTERVAL_SECONDS - (now_ts - last_share_ts)) + 1
+            return jsonify({'success': False, 'error': f'Please wait {wait}s before creating another share link.'}), 429
+
+        # Cap active shares per session
+        session_id = session.get('session_id', '')
+        if session_id:
+            active = _count_active_shares_for_session(session_id, now_ts)
+            if active >= SHARE_MAX_PER_SESSION:
+                return jsonify({'success': False,
+                                'error': f'Maximum of {SHARE_MAX_PER_SESSION} active share links reached. Old links expire after 24 hours.'}), 429
+
         data = request.get_json()
-        task_name = data.get('name', 'Task')
+        task_name = str(data.get('name', 'Task'))[:TASK_NAME_MAX_LEN]
         task_points = data.get('points', [])
         task_options = data.get('options', {})
 
         if len(task_points) < 2:
             return jsonify({'success': False, 'error': 'A task needs at least 2 points'}), 400
+        if len(task_points) > TASK_MAX_POINTS:
+            return jsonify({'success': False, 'error': f'Task exceeds maximum of {TASK_MAX_POINTS} points'}), 400
 
         waypoints = get_session_waypoints()
         task_waypoints = []
@@ -864,7 +907,8 @@ def create_share():
         obs_zones = [tp.get('obsZone', {}) for tp in task_points]
         token = uuid.uuid4().hex[:16]
         share_data = {
-            'created': datetime.now().timestamp(),
+            'created': now_ts,
+            'session_id': session_id,
             'task_name': task_name,
             'task_waypoints': task_waypoints,
             'obs_zones': obs_zones,
@@ -874,6 +918,7 @@ def create_share():
         with open(share_path, 'w', encoding='utf-8') as f:
             json.dump(share_data, f, ensure_ascii=False, indent=2)
 
+        session['_last_share_ts'] = now_ts
         share_url = _get_base_url() + f'/share/{token}'
         return jsonify({'success': True, 'url': share_url})
     except Exception as e:
@@ -981,12 +1026,13 @@ def share_download(token):
         }
         writer, suffix, mimetype = fmt_map.get(fmt, (write_task_cup, '.cup', 'text/plain'))
         content = writer(task_name, task_waypoints, obs_zones, task_options)
-        safe_name = task_name.replace(' ', '_')
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=suffix, encoding='utf-8') as tmp_file:
-            tmp_file.write(content)
-            tmp_path = tmp_file.name
-        return send_file(tmp_path, as_attachment=True,
-                         download_name=f'{safe_name}{suffix}', mimetype=mimetype)
+        safe_name = task_name.replace(' ', '_')[:TASK_NAME_MAX_LEN]
+        from flask import Response
+        return Response(
+            content.encode('utf-8'),
+            mimetype=mimetype,
+            headers={'Content-Disposition': f'attachment; filename="{safe_name}{suffix}"'}
+        )
     except Exception as e:
         app.logger.error(f"Share download error {token}: {e}")
         return 'Error', 500

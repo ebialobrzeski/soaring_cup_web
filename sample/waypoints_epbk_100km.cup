@@ -35,6 +35,53 @@ Narew,,PL,5254.772N,02331.158E,139.0m,1,,,,,
 NAREW 2,EPHN,PL,5254.467N,02332.583E,135.0m,2,316,975.0m,35.0m,118.315,
 NOWOGROD,,PL,5314.433N,02142.617E,98.0m,2,201,280.0m,35.0m,,
 Obstacle,Obsta,PL,5348.998N,02222.484E,124.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5253.097N,02232.959E,125.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5249.564N,02220.843E,122.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5337.884N,02322.077E,182.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5310.121N,02202.256E,112.0M,8,,,,,Height: 70 m GND
+Obstacle,Obsta,PL,5309.593N,02200.739E,123.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5223.204N,02218.387E,180.0M,8,,,,,Height: 100 m GND
+Obstacle,Obsta,PL,5241.913N,02322.090E,163.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5242.756N,02321.750E,171.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5243.026N,02321.688E,166.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5242.476N,02321.859E,156.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5242.172N,02321.934E,163.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5241.659N,02322.246E,166.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5242.145N,02316.881E,166.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5241.939N,02316.194E,152.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5241.981N,02317.455E,136.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5242.309N,02314.830E,151.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5242.146N,02315.700E,152.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5242.583N,02315.515E,148.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5242.612N,02314.011E,142.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5241.678N,02316.746E,150.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5242.348N,02316.267E,163.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5341.763N,02234.814E,141.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5341.566N,02234.894E,126.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5341.781N,02234.341E,135.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5342.052N,02234.942E,139.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5342.030N,02234.390E,130.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5341.905N,02235.902E,126.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5342.241N,02236.175E,132.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5341.999N,02235.472E,131.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5342.177N,02236.849E,132.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5341.471N,02234.475E,131.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5342.137N,02233.986E,132.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5340.139N,02318.973E,163.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5303.111N,02322.084E,171.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5348.931N,02221.010E,122.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5246.879N,02308.168E,153.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5246.921N,02309.255E,158.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5246.906N,02308.651E,155.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5313.845N,02301.545E,181.0M,8,,,,,Height: 100 m GND
+Obstacle,Obsta,PL,5313.891N,02301.606E,184.0M,8,,,,,Height: 331 m GND
+Obstacle,Obsta,PL,5310.185N,02202.000E,127.0M,8,,,,,Height: 150 m GND
+Obstacle,Obsta,PL,5308.435N,02311.462E,152.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5308.486N,02311.331E,147.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5311.664N,02312.269E,123.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5250.822N,02233.824E,140.0M,8,,,,,Height: Unknown
+Obstacle,Obsta,PL,5227.470N,02217.235E,165.0M,8,,,,,Height: 100 m GND
+Obstacle,Obsta,PL,5251.786N,02253.844E,169.0M,8,,,,,Height: Unknown
 OSCAR,OSCAR,PL,5311.117N,02315.733E,132.0M,19,,,,,"Reporting Point, Compulsory"
 PAPA,PAPA,PL,5308.900N,02303.600E,133.0M,19,,,,,"Reporting Point, Compulsory"
 PRZYTULY,,PL,5307.050N,02143.000E,101.0m,2,248,420.0m,20.0m,,
@@ -57,6 +104,6 @@ Wysokie Mazowieckie,,PL,5254.935N,02230.566E,142.0m,1,,,,,
 Zabłudów,,PL,5300.852N,02320.302E,154.0m,1,,,,,
 Zambrów,,PL,5259.128N,02214.648E,126.0m,1,,,,,
 Łapy,,PL,5259.428N,02253.019E,120.0m,1,,,,,
-ŁOMŻA,,PL,5310.750N,02205.633E,91.0m,2,301,315.0m,40.0m,,
 Łomża,,PL,5310.844N,02204.604E,123.0m,1,,,,,
+ŁOMŻA,,PL,5310.750N,02205.633E,91.0m,2,301,315.0m,40.0m,,
 ŁOMŻA II,,PL,5311.633N,02202.902E,96.0m,3,259,1670.0m,0.0m,,Source: lotnik.org
