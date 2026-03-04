@@ -28,6 +28,9 @@ class TaskPlanner {
         this.bearingEditIndex = -1; // Task point index being bearing-edited
         this._onBearingMove = null; // Bound mousemove handler ref
         this._onBearingClick = null; // Bound click handler ref
+        this.airspaces = [];        // Parsed airspace objects
+        this.airspaceLayer = null;  // L.layerGroup for airspace polygons
+        this.airspaceAltFilter = 10000; // feet — altitude filter ceiling
     }
 
     /** Called once when the Task tab is first shown */
@@ -48,11 +51,15 @@ class TaskPlanner {
             maxZoom: 18
         }).addTo(this.map);
 
+        this.airspaceLayer = L.layerGroup().addTo(this.map);
         this.taskLayer = L.layerGroup().addTo(this.map);
         this.markerLayer = L.layerGroup().addTo(this.map);
         this.waypointLayer = L.layerGroup().addTo(this.map);
 
         this.initialized = true;
+
+        // Wind indicator control
+        this.createWindControl();
 
         // Show loaded waypoints immediately
         this.renderWaypointMarkers();
@@ -129,6 +136,49 @@ class TaskPlanner {
                 e.target.value = ''; // Reset so same file can be re-selected
             }
         });
+
+        // Airspace file
+        if (!window.VIEW_MODE) {
+            document.getElementById('airspace-open-btn').addEventListener('click', () => {
+                document.getElementById('airspace-file-input').click();
+            });
+            document.getElementById('airspace-file-input').addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    this.loadAirspaceFile(e.target.files[0]);
+                    e.target.value = '';
+                }
+            });
+            document.getElementById('airspace-clear-btn').addEventListener('click', () => {
+                this.airspaces = [];
+                if (this.airspaceLayer) this.airspaceLayer.clearLayers();
+                document.getElementById('airspace-filter-panel').style.display = 'none';
+                document.getElementById('airspace-clear-btn').style.display = 'none';
+            });
+            document.getElementById('airspace-alt-slider').addEventListener('input', (e) => {
+                this.airspaceAltFilter = parseInt(e.target.value);
+                document.getElementById('airspace-alt-label').textContent = this.formatAlt(this.airspaceAltFilter);
+                this.renderAirspaces();
+            });
+
+            // XCSoar repository button
+            document.getElementById('xcsoar-repo-btn').addEventListener('click', () => this.openRepoModal('airspace'));
+            document.getElementById('xcsoar-repo-close').addEventListener('click', () => this.closeRepoModal());
+            document.getElementById('xcsoar-repo-modal').addEventListener('click', (e) => {
+                if (e.target.id === 'xcsoar-repo-modal') this.closeRepoModal();
+            });
+            document.getElementById('xcsoar-repo-type').addEventListener('change', () => this._filterRepoList());
+            document.getElementById('xcsoar-repo-search').addEventListener('input', () => this._filterRepoList());
+            const repoMapBtn = document.getElementById('xcsoar-repo-map-btn');
+            if (repoMapBtn) repoMapBtn.addEventListener('click', () => this.openRepoModal('waypoint'));
+
+            // Wind arrow live update
+            ['task-wind-dir', 'task-wind-speed', 'task-tas'].forEach(id => {
+                document.getElementById(id).addEventListener('input', () => {
+                    this.updateWindArrow();
+                    this.refreshUI();
+                });
+            });
+        }
 
         // QR modal
         document.getElementById('task-qr-close').addEventListener('click', () => this.hideQRModal());
@@ -423,7 +473,7 @@ class TaskPlanner {
                 </div>
                 <div class="task-point-info">
                     <span class="task-point-oz">${presetName} · R1=${tp.obsZone.r1}m</span>
-                    ${idx > 0 ? `<span class="task-point-dist">${this.legDistance(idx)} km</span>` : ''}
+                    ${idx > 0 ? `<span class="task-point-dist">${this.legDistance(idx)} km${this.legTime(idx) ? ' · ' + this.legTime(idx) : ''}</span>` : ''}
                 </div>
                 ${viewMode ? '' : `<div class="task-point-actions">
                     <button class="btn btn-sm btn-secondary" title="Move up" onclick="window.taskPlanner.movePoint(${idx},-1)" ${idx === 0 ? 'disabled' : ''}>
@@ -857,6 +907,65 @@ class TaskPlanner {
         return total.toFixed(1);
     }
 
+    /** Bearing in radians from taskPoints[idx-1] to taskPoints[idx] */
+    legBearingRad(idx) {
+        const wp1 = this.taskPoints[idx - 1].waypoint;
+        const wp2 = this.taskPoints[idx].waypoint;
+        const lat1 = wp1.latitude  * Math.PI / 180;
+        const lat2 = wp2.latitude  * Math.PI / 180;
+        const dLng = (wp2.longitude - wp1.longitude) * Math.PI / 180;
+        return Math.atan2(
+            Math.sin(dLng) * Math.cos(lat2),
+            Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng)
+        );
+    }
+
+    /**
+     * Estimated ground speed (kt) for leg idx using the headwind component method.
+     * Returns null when TAS is not set.
+     */
+    legGroundSpeed(idx) {
+        if (idx <= 0) return null;
+        const tasEl = document.getElementById('task-tas');
+        const tas = tasEl ? (parseFloat(tasEl.value) || 0) : 0;
+        if (tas <= 0) return null;
+        const wdEl = document.getElementById('task-wind-dir');
+        const wsEl = document.getElementById('task-wind-speed');
+        const wd = (wdEl ? (parseFloat(wdEl.value) || 0) : 0) * Math.PI / 180;
+        const wsKt = wsEl ? (parseFloat(wsEl.value) || 0) : 0;
+        const wsKmh = wsKt * 1.852;  // convert wind speed to km/h to match TAS
+        // Headwind component: positive means headwind
+        const bearing = this.legBearingRad(idx);
+        const hw = wsKmh * Math.cos(bearing - wd);
+        return Math.max(tas - hw, 1);  // clamp to 1 km/h to avoid division by zero
+    }
+
+    /** Formatted leg time string (e.g. "1h23m" or "45m") for leg idx, or null if TAS not set */
+    legTime(idx) {
+        if (idx <= 0) return null;
+        const gs = this.legGroundSpeed(idx);
+        if (!gs) return null;
+        const distKm = this.distanceKm(this.taskPoints[idx - 1].waypoint, this.taskPoints[idx].waypoint);
+        const totalMin = distKm / gs * 60;  // gs in km/h, dist in km
+        const h = Math.floor(totalMin / 60);
+        const m = Math.round(totalMin % 60);
+        return h > 0 ? `${h}h${String(m).padStart(2, '0')}m` : `${m}m`;
+    }
+
+    /** Formatted total task time, or null if TAS not set */
+    totalTime() {
+        if (this.taskPoints.length < 2) return null;
+        let totalMin = 0;
+        for (let i = 1; i < this.taskPoints.length; i++) {
+            const gs = this.legGroundSpeed(i);
+            if (!gs) return null;
+            totalMin += this.distanceKm(this.taskPoints[i - 1].waypoint, this.taskPoints[i].waypoint) / gs * 60;  // gs in km/h
+        }
+        const h = Math.floor(totalMin / 60);
+        const m = Math.round(totalMin % 60);
+        return h > 0 ? `${h}h${String(m).padStart(2, '0')}m` : `${m}m`;
+    }
+
     updateSummary() {
         const summary = document.getElementById('task-summary');
         if (this.taskPoints.length < 2) {
@@ -866,6 +975,12 @@ class TaskPlanner {
         summary.style.display = 'block';
         document.getElementById('task-total-distance').textContent = this.totalDistance() + ' km';
         document.getElementById('task-leg-count').textContent = this.taskPoints.length - 1;
+        const t = this.totalTime();
+        const timeRow = document.getElementById('task-total-time-row');
+        if (timeRow) {
+            timeRow.style.display = t ? '' : 'none';
+            if (t) document.getElementById('task-total-time').textContent = t;
+        }
     }
 
     updateButtons() {
@@ -1192,6 +1307,385 @@ class TaskPlanner {
             }
         } catch (e) {
             // Ignore load errors silently
+        }
+    }
+
+    // ──────────── Airspace ────────────
+
+    loadAirspaceFile(file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                this.airspaces = this.parseOpenAir(e.target.result);
+                document.getElementById('airspace-file-name').textContent = file.name;
+                document.getElementById('airspace-count').textContent = this.airspaces.length + ' zones';
+                document.getElementById('airspace-filter-panel').style.display = '';
+                document.getElementById('airspace-clear-btn').style.display = '';
+                this.renderAirspaces();
+            } catch (err) {
+                alert('Failed to parse airspace file: ' + err.message);
+            }
+        };
+        reader.readAsText(file, 'UTF-8');
+    }
+
+    parseDMSPoint(str) {
+        const m = str.match(/(\d+):(\d+):(\d+(?:\.\d+)?)\s*([NS])\s+(\d+):(\d+):(\d+(?:\.\d+)?)\s*([EW])/);
+        if (!m) return null;
+        const lat = (parseInt(m[1]) + parseInt(m[2]) / 60 + parseFloat(m[3]) / 3600) * (m[4] === 'S' ? -1 : 1);
+        const lon = (parseInt(m[5]) + parseInt(m[6]) / 60 + parseFloat(m[7]) / 3600) * (m[8] === 'W' ? -1 : 1);
+        return [lat, lon];
+    }
+
+    parseAltFt(str) {
+        const s = str.trim().toUpperCase();
+        if (s === 'GND' || s === 'SFC' || s === 'AGL' || s === 'MSL') return 0;
+        const fl = s.match(/^FL\s*(\d+)/);
+        if (fl) return parseInt(fl[1]) * 100;
+        const ft = s.match(/^(\d+(?:\.\d+)?)\s*FT/);
+        if (ft) return Math.round(parseFloat(ft[1]));
+        const mt = s.match(/^(\d+(?:\.\d+)?)\s*M(?:\s|$)/);
+        if (mt) return Math.round(parseFloat(mt[1]) * 3.281);
+        return 0;
+    }
+
+    formatAlt(ft) {
+        if (ft === 0) return 'GND';
+        if (ft >= 1000 && ft % 100 === 0) return 'FL' + String(ft / 100).padStart(3, '0');
+        return ft.toLocaleString() + ' ft';
+    }
+
+    parseOpenAir(text) {
+        const airspaces = [];
+        let cur = null;
+        let cx = null;
+
+        for (let raw of text.split('\n')) {
+            const line = raw.trim();
+            if (!line || line.startsWith('*')) continue;
+
+            if (line.startsWith('AC ')) {
+                if (cur) airspaces.push(cur);
+                cur = { cls: line.slice(3).trim(), name: '', altLower: 0, altUpper: 99999, time: null, points: [], circles: [] };
+                cx = null;
+            } else if (!cur) {
+                continue;
+            } else if (line.startsWith('AN ')) {
+                cur.name = line.slice(3).trim();
+            } else if (line.startsWith('AL ')) {
+                cur.altLower = this.parseAltFt(line.slice(3));
+            } else if (line.startsWith('AH ')) {
+                cur.altUpper = this.parseAltFt(line.slice(3));
+            } else if (line.startsWith('AT ')) {
+                cur.time = line.slice(3).trim();
+            } else if (line.includes('X=')) {
+                cx = this.parseDMSPoint(line.slice(line.indexOf('X=') + 2));
+            } else if (line.startsWith('DP ')) {
+                const ll = this.parseDMSPoint(line.slice(3));
+                if (ll) cur.points.push(ll);
+            } else if (line.startsWith('DC ')) {
+                const r = parseFloat(line.slice(3));
+                if (cx && !isNaN(r)) cur.circles.push({ center: cx, radius: r * 1852 });
+            }
+        }
+        if (cur) airspaces.push(cur);
+        return airspaces;
+    }
+
+    getAirspaceStyle(cls) {
+        const c = (cls || '').trim().toUpperCase();
+        if (c === 'R')                         return { color: '#dc2626', fillOpacity: 0.12 };
+        if (c === 'P')                         return { color: '#7f1d1d', fillOpacity: 0.18 };
+        if (c === 'D')                         return { color: '#ea580c', fillOpacity: 0.12 };
+        if (c === 'CTR')                       return { color: '#7c3aed', fillOpacity: 0.10 };
+        if (c.includes('RMZ'))                 return { color: '#0891b2', fillOpacity: 0.08 };
+        if (c.includes('TMZ'))                 return { color: '#6b7280', fillOpacity: 0.06 };
+        if (c === 'C' || c === 'B')            return { color: '#2563eb', fillOpacity: 0.10 };
+        if (c === 'A')                         return { color: '#1e3a8a', fillOpacity: 0.14 };
+        if (c === 'E')                         return { color: '#3b82f6', fillOpacity: 0.06 };
+        if (c.includes('FIR'))                 return { color: '#94a3b8', fillOpacity: 0.03 };
+        return                                        { color: '#64748b', fillOpacity: 0.05 };
+    }
+
+    renderAirspaces() {
+        if (!this.initialized || !this.airspaceLayer) return;
+        this.airspaceLayer.clearLayers();
+        if (this._airspaceMoveHandler) {
+            this.map.off('mousemove', this._airspaceMoveHandler);
+            this._airspaceMoveHandler = null;
+        }
+        const maxAlt = this.airspaceAltFilter;
+
+        // Create shared floating tooltip element (once)
+        if (!this._airspaceTooltipEl) {
+            this._airspaceTooltipEl = document.createElement('div');
+            this._airspaceTooltipEl.className = 'airspace-multi-tooltip';
+            this._airspaceTooltipEl.style.display = 'none';
+            document.body.appendChild(this._airspaceTooltipEl);
+        }
+        const tooltipEl = this._airspaceTooltipEl;
+
+        // Build flat list of {layer, as, s} for hit-testing
+        const allLayers = [];
+
+        for (const as of this.airspaces) {
+            if (as.altLower > maxAlt) continue;
+            const s = this.getAirspaceStyle(as.cls);
+            const baseOpts = { color: s.color, weight: 1.5, opacity: 0.85, fillColor: s.color, fillOpacity: s.fillOpacity, interactive: false, bubblingMouseEvents: false };
+
+            if (as.points.length >= 3) {
+                const layer = L.polygon(as.points, { ...baseOpts }).addTo(this.airspaceLayer);
+                allLayers.push({ layer, as, s });
+            }
+            for (const c of as.circles) {
+                const layer = L.circle(c.center, { ...baseOpts, radius: c.radius }).addTo(this.airspaceLayer);
+                allLayers.push({ layer, as, s });
+            }
+        }
+
+        // Single map-level mousemove — hit-test every shape ourselves
+        const prevHit = new Set();
+
+        this._airspaceMoveHandler = (e) => {
+            const pt = e.layerPoint;
+            const nowHit = new Set();
+            const hitAirspaces = [];
+
+            for (const item of allLayers) {
+                let inside = false;
+                try { inside = item.layer._containsPoint(pt); } catch (_) {}
+                if (!inside && item.layer instanceof L.Circle) {
+                    inside = e.latlng.distanceTo(item.layer.getLatLng()) <= item.layer.getRadius();
+                }
+
+                if (inside) {
+                    const id = L.stamp(item.layer);
+                    nowHit.add(id);
+                    hitAirspaces.push(item);
+                    if (!prevHit.has(id)) {
+                        item.layer.setStyle({ weight: 2.5, fillOpacity: Math.min(item.s.fillOpacity * 2.5, 0.5) });
+                    }
+                }
+            }
+
+            // Un-highlight shapes we just left
+            for (const item of allLayers) {
+                const id = L.stamp(item.layer);
+                if (prevHit.has(id) && !nowHit.has(id)) {
+                    item.layer.setStyle({ weight: 1.5, fillOpacity: item.s.fillOpacity });
+                }
+            }
+            prevHit.clear();
+            nowHit.forEach(id => prevHit.add(id));
+
+            if (hitAirspaces.length === 0) {
+                tooltipEl.style.display = 'none';
+                return;
+            }
+
+            // Build tooltip content
+            const parts = hitAirspaces.map(({ as }) => {
+                let row = `<div class="astt-entry">`;
+                row += `<div class="astt-name">${this.escapeHtml(as.name || as.cls)}</div>`;
+                row += `<div class="astt-meta">Class&nbsp;<strong>${this.escapeHtml(as.cls)}</strong>`;
+                row += `&emsp;${this.escapeHtml(this.formatAlt(as.altLower))}&thinsp;&ndash;&thinsp;${this.escapeHtml(this.formatAlt(as.altUpper))}</div>`;
+                if (as.time) row += `<div class="astt-time"><i class="fas fa-clock"></i> ${this.escapeHtml(as.time)}</div>`;
+                row += `</div>`;
+                return row;
+            });
+            tooltipEl.innerHTML = parts.join('<hr class="astt-sep">');
+            tooltipEl.style.display = '';
+
+            const mx = e.originalEvent.clientX, my = e.originalEvent.clientY;
+            const pad = 14;
+            const tw = tooltipEl.offsetWidth || 220, th = tooltipEl.offsetHeight || 60;
+            tooltipEl.style.left = (mx + pad + tw > window.innerWidth  ? mx - tw - pad : mx + pad) + 'px';
+            tooltipEl.style.top  = (my + pad + th > window.innerHeight ? my - th - pad : my + pad) + 'px';
+        };
+
+        this.map.on('mousemove', this._airspaceMoveHandler);
+
+        this.map.getContainer().addEventListener('mouseleave', () => {
+            for (const item of allLayers) {
+                item.layer.setStyle({ weight: 1.5, fillOpacity: item.s.fillOpacity });
+            }
+            prevHit.clear();
+            tooltipEl.style.display = 'none';
+        });
+    }
+
+    // ──────────── Wind control ────────────
+
+    createWindControl() {
+        const self = this;
+        const WindControl = L.Control.extend({
+            onAdd() {
+                const div = L.DomUtil.create('div', 'wind-map-control');
+                div.innerHTML = `
+                    <div class="wmc-arrow" id="task-wind-arrow">
+                        <svg viewBox="-12 -20 24 40" width="24" height="40">
+                            <polygon points="0,-18 5,2 0,-3 -5,2" fill="#2563eb" stroke="white" stroke-width="1"/>
+                            <line x1="-6" y1="12" x2="6" y2="12" stroke="#2563eb" stroke-width="1.5"/>
+                            <line x1="-5" y1="16" x2="5" y2="16" stroke="#2563eb" stroke-width="1.5"/>
+                            <line x1="-3" y1="20" x2="3" y2="20" stroke="#2563eb" stroke-width="1.5"/>
+                        </svg>
+                    </div>
+                    <div class="wmc-label" id="task-wind-label">-- / --</div>`;
+                L.DomEvent.disableClickPropagation(div);
+                return div;
+            },
+            onRemove() {}
+        });
+        this._windControl = new WindControl({ position: 'topright' });
+        this._windControl.addTo(this.map);
+        this.updateWindArrow();
+    }
+
+    updateWindArrow() {
+        const dirEl  = document.getElementById('task-wind-dir');
+        const spdEl  = document.getElementById('task-wind-speed');
+        const tasEl  = document.getElementById('task-tas');
+        const arrEl  = document.getElementById('task-wind-arrow');
+        const lblEl  = document.getElementById('task-wind-label');
+        const dir    = dirEl  ? (parseInt(dirEl.value)  || 0) : 0;
+        const speed  = spdEl  ? (parseInt(spdEl.value)  || 0) : 0;
+        const tas    = tasEl  ? (parseInt(tasEl.value)   || 0) : 0;
+        if (arrEl) arrEl.style.transform = `rotate(${(dir + 180) % 360}deg)`;
+        const tasStr = tas > 0 ? `\u00a0TAS\u00a0${tas}` : '';
+        if (lblEl) lblEl.textContent = `${dir}\u00b0\u00a0${speed}\u00a0kt${tasStr}`;
+    }
+
+    // ──────────── XCSoar Repository ────────────
+
+    async openRepoModal(lockedType) {
+        this._repoLockedType = lockedType || null;
+        document.getElementById('xcsoar-repo-modal').classList.add('show');
+        document.getElementById('xcsoar-repo-search').value = '';
+
+        const typeSelect = document.getElementById('xcsoar-repo-type');
+        if (lockedType) {
+            typeSelect.value = lockedType;
+            typeSelect.disabled = true;
+        } else {
+            typeSelect.value = '';
+            typeSelect.disabled = false;
+        }
+
+        if (this._repoEntries) {
+            this._filterRepoList();
+            return;
+        }
+
+        const status = document.getElementById('xcsoar-repo-status');
+        const list = document.getElementById('xcsoar-repo-list');
+        status.textContent = 'Loading repository…';
+        status.style.display = '';
+        list.innerHTML = '';
+
+        try {
+            const resp = await fetch('/api/xcsoar-repo');
+            const data = await resp.json();
+            if (data.error) throw new Error(data.error);
+            this._repoEntries = data.entries;
+            status.style.display = 'none';
+            this._filterRepoList();
+        } catch (e) {
+            status.textContent = 'Failed to load repository: ' + e.message;
+        }
+    }
+
+    closeRepoModal() {
+        document.getElementById('xcsoar-repo-modal').classList.remove('show');
+    }
+
+    _filterRepoList() {
+        const typeFilter = this._repoLockedType || document.getElementById('xcsoar-repo-type').value;
+        const search = document.getElementById('xcsoar-repo-search').value.toLowerCase().trim();
+        const entries = this._repoEntries || [];
+        const filtered = entries.filter(e => {
+            if (typeFilter && e.type !== typeFilter) return false;
+            if (search) {
+                const hay = ((e.area || '') + ' ' + (e.name || '') + ' ' + (e.description || '')).toLowerCase();
+                if (!hay.includes(search)) return false;
+            }
+            return true;
+        });
+        this._renderRepoList(filtered);
+    }
+
+    _renderRepoList(entries) {
+        const list = document.getElementById('xcsoar-repo-list');
+        if (!entries.length) {
+            list.innerHTML = '<div class="xcsoar-repo-empty">No entries found.</div>';
+            return;
+        }
+        list.innerHTML = entries.map((e, i) => {
+            const typeBadge = e.type === 'waypoint'
+                ? '<span class="xcsoar-badge xcsoar-badge-wp">WPT</span>'
+                : '<span class="xcsoar-badge xcsoar-badge-as">ASP</span>';
+            const area = e.area ? `<strong>${e.area.toUpperCase()}</strong> · ` : '';
+            const desc = this.escapeHtml(e.description || e.name || '');
+            const update = e.update ? ` <span class="xcsoar-repo-date">${e.update}</span>` : '';
+            return `<div class="xcsoar-repo-item">
+                <div class="xcsoar-repo-item-info">
+                    ${typeBadge}
+                    <span class="xcsoar-repo-item-name">${area}${desc}${update}</span>
+                </div>
+                <button class="btn btn-sm btn-primary xcsoar-load-btn" data-idx="${i}">
+                    <i class="fas fa-download"></i> Load
+                </button>
+            </div>`;
+        }).join('');
+
+        list.querySelectorAll('.xcsoar-load-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const filtered = this._currentFilteredEntries || entries;
+                const entry = entries[parseInt(btn.dataset.idx)];
+                await this._loadRepoEntry(entry, btn);
+            });
+        });
+        this._currentFilteredEntries = entries;
+    }
+
+    async _loadRepoEntry(entry, btn) {
+        const origHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        try {
+            const proxyUrl = '/api/xcsoar-proxy?url=' + encodeURIComponent(entry.uri);
+            const resp = await fetch(proxyUrl);
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.error || resp.statusText);
+            }
+
+            if (entry.type === 'waypoint') {
+                const blob = await resp.blob();
+                const fname = (entry.uri.split('/').pop() || 'wpt.cup');
+                const file = new File([blob], fname, { type: 'text/plain' });
+                const formData = new FormData();
+                formData.append('file', file);
+                const uploadResp = await fetch('/api/upload', { method: 'POST', body: formData });
+                const result = await uploadResp.json();
+                if (!result.success) throw new Error(result.error || 'Upload failed');
+                if (window.app) {
+                    window.app.waypoints = result.waypoints;
+                    window.app.updateUI();
+                }
+                this.closeRepoModal();
+                alert(`Loaded ${result.waypoints.length} waypoints from ${entry.name || entry.area}`);
+            } else if (entry.type === 'airspace') {
+                const text = await resp.text();
+                const fname = (entry.uri.split('/').pop() || 'airspace.txt');
+                const file = new File([text], fname, { type: 'text/plain' });
+                this.loadAirspaceFile(file);
+                this.closeRepoModal();
+            }
+        } catch (e) {
+            alert('Load failed: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
         }
     }
 

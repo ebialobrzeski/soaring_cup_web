@@ -211,8 +211,9 @@ header p {
 .view-mode-banner a:hover { text-decoration: underline; }
 
 /* Hide editor chrome in view mode */
-body.view-mode .action-bar,
-body.view-mode .task-import-row,
+body.view-mode .sidebar-file-row,
+body.view-mode #airspace-filter-panel,
+body.view-mode .wind-inline,
 body.view-mode .task-wp-search-wrap,
 body.view-mode #task-clear-btn,
 body.view-mode #task-share-btn {
@@ -382,6 +383,15 @@ body.view-mode #task-share-btn {
     display: flex;
     gap: 10px;
     flex-wrap: wrap;
+    align-items: center;
+}
+
+.map-controls-divider {
+    width: 1px;
+    height: 28px;
+    background: var(--border);
+    margin: 0 4px;
+    flex-shrink: 0;
 }
 
 /* Modal */
@@ -667,11 +677,6 @@ body.view-mode #task-share-btn {
         font-size: 2rem;
     }
     
-    .action-bar {
-        flex-direction: column;
-        align-items: stretch;
-    }
-    
     .file-actions,
     .waypoint-actions {
         justify-content: center;
@@ -908,8 +913,9 @@ body.view-mode #task-share-btn {
     flex: 0 0 380px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
-    overflow-y: auto;\n}
+    gap: 8px;
+    overflow-y: auto;
+}
 
 .task-sidebar h3 {
     margin: 0;
@@ -920,9 +926,14 @@ body.view-mode #task-share-btn {
     color: var(--primary-color);
 }
 
-.task-import-row {
-    margin-bottom: 8px;
+/* File buttons row */
+.sidebar-file-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
 }
+.sidebar-file-row .btn { flex-shrink: 0; }
 
 .task-map-area {
     flex: 1;
@@ -1103,23 +1114,199 @@ body.view-mode #task-share-btn {
     text-decoration: none;
 }
 
-/* Task options panel */
-.task-options-panel summary {
-    cursor: pointer;
-    font-weight: 500;
+/* Compact task meta block (name + options) */
+.task-meta-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+}
+.task-name-input {
+    border: none;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    padding: 8px 10px;
     font-size: 14px;
-    padding: 6px 0;
+    font-weight: 600;
+    background: var(--surface);
+    width: 100%;
+    box-sizing: border-box;
+}
+.task-name-input:focus { outline: none; background: var(--background); }
+.task-options-details { background: var(--surface); }
+.task-options-details summary {
+    cursor: pointer;
+    padding: 6px 10px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    list-style: none;
     display: flex;
     align-items: center;
     gap: 6px;
-    color: var(--text-secondary);
+    user-select: none;
 }
-
+.task-options-details summary::-webkit-details-marker { display: none; }
 .task-options-body {
-    padding-top: 8px;
+    padding: 8px 10px;
     display: flex;
     flex-direction: column;
+    gap: 6px;
+    border-top: 1px solid var(--border);
+}
+.task-options-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+.task-options-row label { font-size: 12px; color: var(--text-secondary); }
+.task-options-row input { width: 110px; text-align: right; }
+
+/* Wind inline row (sidebar) */
+.wind-inline {
+    display: flex;
+    align-items: center;
     gap: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+}
+.wind-inline-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.wind-inline-fields { display: flex; gap: 8px; flex: 1; }
+.wind-inline-field { display: flex; align-items: center; gap: 4px; flex: 1; }
+.wind-inline-field label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+.wind-inline-field input { width: 100%; }
+
+/* Wind map control (Leaflet bottom-left) */
+.wind-map-control {
+    background: rgba(255,255,255,0.92);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.18);
+    min-width: 44px;
+    user-select: none;
+}
+.wmc-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.3s ease;
+}
+.wmc-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: #2563eb;
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+}
+
+/* Airspace filter panel */
+.airspace-filter-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.airspace-filename-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.airspace-filename {
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 70%;
+}
+.airspace-count {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--primary-color);
+    white-space: nowrap;
+}
+.airspace-slider {
+    width: 100%;
+    accent-color: var(--primary-color);
+    cursor: pointer;
+}
+.airspace-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+}
+.airspace-slider-row label {
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+.airspace-slider-row .airspace-slider { flex: 1; }
+
+/* Waypoint search wrapper */
+.task-wp-search-wrap { display: flex; flex-direction: column; gap: 4px; }
+.task-wp-search-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+
+/* Multi-airspace floating tooltip */
+.airspace-multi-tooltip {
+    position: fixed;
+    z-index: 9000;
+    background: rgba(15, 23, 42, 0.95);
+    color: #f1f5f9;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    max-width: 280px;
+    pointer-events: none;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+.astt-entry {
+    padding: 2px 0;
+}
+.astt-name {
+    font-weight: 600;
+    color: #e2e8f0;
+    margin-bottom: 2px;
+}
+.astt-meta {
+    color: #94a3b8;
+    font-size: 11px;
+}
+.astt-time {
+    color: #fbbf24;
+    font-size: 11px;
+    margin-top: 2px;
+}
+.astt-time .fas {
+    margin-right: 3px;
+}
+.astt-sep {
+    border: none;
+    border-top: 1px solid rgba(148,163,184,0.2);
+    margin: 6px 0;
 }
 
 /* Task QR modal body */
@@ -1281,10 +1468,6 @@ body.view-mode #task-share-btn {
         font-size: 0.9rem;
     }
     
-    .action-bar {
-        padding: 10px;
-    }
-    
     .btn {
         padding: 8px 12px;
         font-size: 13px;
@@ -1316,4 +1499,122 @@ body.view-mode #task-share-btn {
         font-size: 12px;
         padding: 8px 12px;
     }
+}
+
+/* ──────────── XCSoar Repository Modal ──────────── */
+
+.xcsoar-repo-dialog {
+    max-width: 640px;
+}
+
+.xcsoar-repo-body {
+    padding: 16px 20px 20px;
+}
+
+.xcsoar-repo-filters {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
+.xcsoar-repo-filters select {
+    flex: 0 0 130px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.xcsoar-repo-filters input {
+    flex: 1 1 160px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.xcsoar-repo-status {
+    padding: 12px 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+    text-align: center;
+}
+
+.xcsoar-repo-list {
+    max-height: 440px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.xcsoar-repo-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+}
+
+.xcsoar-repo-item:last-child {
+    border-bottom: none;
+}
+
+.xcsoar-repo-item:hover {
+    background: var(--background);
+}
+
+.xcsoar-repo-item-info {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    flex: 1;
+    min-width: 0;
+}
+
+.xcsoar-repo-item-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-primary);
+}
+
+.xcsoar-repo-date {
+    color: var(--text-secondary);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.xcsoar-badge {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.xcsoar-badge-wp {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.xcsoar-badge-as {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.xcsoar-repo-empty {
+    padding: 24px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 13px;
 }

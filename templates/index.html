@@ -38,22 +38,6 @@
             </div>
         </div>
 
-        <!-- Action Bar -->
-        <div class="action-bar">
-            <div class="file-actions">
-                <button id="new-btn" class="btn btn-primary">
-                    <i class="fas fa-file"></i> New
-                </button>
-                <label for="file-upload" class="btn btn-primary">
-                    <i class="fas fa-folder-open"></i> Open File
-                </label>
-                <input type="file" id="file-upload" accept=".cup,.csv" style="display: none;">
-                <button id="save-cup-btn" class="btn btn-success" disabled>
-                    <i class="fas fa-save"></i> Save CUP
-                </button>
-            </div>
-        </div>
-
         <!-- Status Bar -->
         <div id="status-bar" class="status-bar">
             <span id="status-text">Ready - No waypoints loaded</span>
@@ -80,6 +64,19 @@
             <!-- Map View Tab -->
             <div id="map-tab" class="tab-pane{% if not view_mode %} active{% endif %}">
                 <div class="map-controls">
+                    {% if not view_mode %}
+                    <button id="new-btn" class="btn btn-primary">
+                        <i class="fas fa-file"></i> New
+                    </button>
+                    <label for="file-upload" class="btn btn-primary">
+                        <i class="fas fa-folder-open"></i> Open File
+                    </label>
+                    <input type="file" id="file-upload" accept=".cup,.csv" style="display: none;">
+                    <button id="save-cup-btn" class="btn btn-success" disabled>
+                        <i class="fas fa-save"></i> Save CUP
+                    </button>
+                    <span class="map-controls-divider"></span>
+                    {% endif %}
                     <button id="fit-bounds-btn" class="btn btn-secondary">
                         <i class="fas fa-expand-arrows-alt"></i> Fit All
                     </button>
@@ -89,6 +86,11 @@
                     <button id="show-legend-btn" class="btn btn-secondary">
                         <i class="fas fa-info-circle"></i> Legend
                     </button>
+                    {% if not view_mode %}
+                    <button id="xcsoar-repo-map-btn" class="btn btn-secondary" title="Browse XCSoar waypoint repository">
+                        <i class="fas fa-database"></i> Repository
+                    </button>
+                    {% endif %}
                 </div>
                 <div id="map" class="map-container"></div>
             </div>
@@ -97,33 +99,73 @@
             <div id="task-tab" class="tab-pane{% if view_mode %} active{% endif %}">
                 <div class="task-planner">
                     <div class="task-sidebar">
-                        <h3><i class="fas fa-route"></i> Task Definition</h3>
+                        <h3><i class="fas fa-route"></i> Task Planner</h3>
 
-                        <!-- Open task file -->
-                        <div class="task-import-row">
+                        <!-- File buttons row -->
+                        <div class="sidebar-file-row">
                             <button id="task-open-btn" class="btn btn-secondary btn-sm">
-                                <i class="fas fa-folder-open"></i> Open Task File
+                                <i class="fas fa-folder-open"></i> Task
                             </button>
                             <input type="file" id="task-file-input" accept=".cup" style="display:none">
+                            {% if not view_mode %}
+                            <button id="airspace-open-btn" class="btn btn-secondary btn-sm">
+                                <i class="fas fa-shield-alt"></i> Airspace
+                            </button>
+                            <input type="file" id="airspace-file-input" accept=".txt,.openair,.air" style="display:none">
+                            <button id="airspace-clear-btn" class="btn btn-sm btn-light" style="display:none" title="Remove airspace">
+                                <i class="fas fa-times"></i>
+                            </button>
+                            <button id="xcsoar-repo-btn" class="btn btn-secondary btn-sm" title="Browse XCSoar data repository">
+                                <i class="fas fa-database"></i> Repository
+                            </button>
+                            {% endif %}
                         </div>
 
-                        <!-- Task name -->
-                        <div class="form-group">
-                            <label for="task-name">Task Name</label>
-                            <input type="text" id="task-name" value="Task 1" placeholder="Task name">
+                        {% if not view_mode %}
+                        <!-- Airspace filter (shown after file load) -->
+                        <div id="airspace-filter-panel" class="airspace-filter-panel" style="display:none">
+                            <div class="airspace-filename-row">
+                                <span id="airspace-file-name" class="airspace-filename"></span>
+                                <span id="airspace-count" class="airspace-count"></span>
+                            </div>
+                            <div class="airspace-slider-row">
+                                <label>Alt&nbsp;max:&nbsp;<strong id="airspace-alt-label">FL100</strong></label>
+                                <input type="range" id="airspace-alt-slider" class="airspace-slider" min="0" max="25000" step="500" value="10000">
+                            </div>
                         </div>
 
-                        <!-- Task options -->
-                        <div class="task-options-panel">
-                            <details>
-                                <summary><i class="fas fa-cog"></i> Task Options</summary>
+                        <!-- Wind inline row -->
+                        <div class="wind-inline">
+                            <span class="wind-inline-label"><i class="fas fa-wind"></i> Wind</span>
+                            <div class="wind-inline-fields">
+                                <div class="wind-inline-field">
+                                    <label for="task-wind-dir">&deg;</label>
+                                    <input type="number" id="task-wind-dir" min="0" max="360" value="0" placeholder="0">
+                                </div>
+                                <div class="wind-inline-field">
+                                    <label for="task-wind-speed">kt</label>
+                                    <input type="number" id="task-wind-speed" min="0" max="150" value="15" placeholder="15">
+                                </div>
+                                <div class="wind-inline-field">
+                                    <label for="task-tas">TAS&nbsp;km/h</label>
+                                    <input type="number" id="task-tas" min="0" max="400" value="100" placeholder="100">
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Task name + options in one compact block -->
+                        <div class="task-meta-block">
+                            <input type="text" id="task-name" class="task-name-input" value="Task 1" placeholder="Task name">
+                            <details class="task-options-details">
+                                <summary><i class="fas fa-cog"></i> Options</summary>
                                 <div class="task-options-body">
-                                    <div class="form-group">
-                                        <label for="task-no-start">No Start Before (UTC)</label>
+                                    <div class="task-options-row">
+                                        <label for="task-no-start">No start before (UTC)</label>
                                         <input type="time" id="task-no-start" value="12:00">
                                     </div>
-                                    <div class="form-group">
-                                        <label for="task-time">Task Time (HH:MM:SS)</label>
+                                    <div class="task-options-row">
+                                        <label for="task-time">Task time</label>
                                         <input type="text" id="task-time" value="03:00:00" placeholder="HH:MM:SS">
                                     </div>
                                 </div>
@@ -131,10 +173,12 @@
                         </div>
 
                         <!-- Search waypoints -->
-                        <div class="form-group">
-                            <label>Add Waypoint to Task</label>
-                            <input type="text" id="task-wp-search" placeholder="Search waypoints..." autocomplete="off">
-                            <div id="task-wp-results" class="task-wp-results"></div>
+                        <div class="task-wp-search-wrap">
+                            <label class="task-wp-search-label">Add Waypoint</label>
+                            <div style="position:relative">
+                                <input type="text" id="task-wp-search" placeholder="Search waypoints..." autocomplete="off">
+                                <div id="task-wp-results" class="task-wp-results"></div>
+                            </div>
                         </div>
 
                         <!-- Task points list -->
@@ -147,6 +191,10 @@
                             <div class="task-summary-row">
                                 <span>Total distance:</span>
                                 <strong id="task-total-distance">0 km</strong>
+                            </div>
+                            <div class="task-summary-row" id="task-total-time-row" style="display:none;">
+                                <span>Est. flight time:</span>
+                                <strong id="task-total-time">&mdash;</strong>
                             </div>
                             <div class="task-summary-row">
                                 <span>Legs:</span>
@@ -503,6 +551,28 @@
         <div class="loading-spinner">
             <i class="fas fa-spinner fa-spin"></i>
             <p>Loading...</p>
+        </div>
+    </div>
+
+    <!-- XCSoar Repository Modal -->
+    <div id="xcsoar-repo-modal" class="modal">
+        <div class="modal-content xcsoar-repo-dialog">
+            <div class="modal-header">
+                <h2><i class="fas fa-database"></i> XCSoar Repository</h2>
+                <button class="close-btn" id="xcsoar-repo-close">&times;</button>
+            </div>
+            <div class="xcsoar-repo-body">
+                <div class="xcsoar-repo-filters">
+                    <select id="xcsoar-repo-type">
+                        <option value="">All types</option>
+                        <option value="waypoint">Waypoints</option>
+                        <option value="airspace">Airspace</option>
+                    </select>
+                    <input type="text" id="xcsoar-repo-search" placeholder="Search by country or name…" autocomplete="off">
+                </div>
+                <div id="xcsoar-repo-status" class="xcsoar-repo-status" style="display:none;"></div>
+                <div id="xcsoar-repo-list" class="xcsoar-repo-list"></div>
+            </div>
         </div>
     </div>
 

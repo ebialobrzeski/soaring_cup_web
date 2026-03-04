@@ -733,6 +733,9 @@ class SoaringCupEditor {
         this.updateMapMarkers(); // Use direct call instead of debounced for initial loads
         this.updateActionButtons();
         this.updateStatus();
+        if (window.taskPlanner) {
+            window.taskPlanner.refreshUI();
+        }
     }
 
     updateTable() {
