@@ -1,7 +1,7 @@
 #!/bin/bash
-# Simple startup script for Soaring CUP Web Editor
+# Simple startup script for GlidePlan
 
-echo "Starting Soaring CUP Web Editor..."
+echo "Starting GlidePlan..."
 
 # Check if Python is available
 if ! command -v python3 &> /dev/null; then

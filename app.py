@@ -1,6 +1,6 @@
 """
-Flask web application for Soaring CUP File Editor.
-Converts the desktop Tkinter app to a web-based interface.
+Flask web application for GlidePlan.
+Task planning and waypoint file editor for soaring and gliding.
 """
 
 import os
@@ -26,8 +26,8 @@ from backend.file_io import (
 from backend.config import STYLE_OPTIONS
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'soaring_cup_editor_secret_key_change_in_production')
-if app.secret_key == 'soaring_cup_editor_secret_key_change_in_production':
+app.secret_key = os.environ.get('SECRET_KEY', 'glideplan_secret_key_change_in_production')
+if app.secret_key == 'glideplan_secret_key_change_in_production':
     import warnings
     warnings.warn('SECRET_KEY is set to the default insecure value. Set the SECRET_KEY environment variable in production.', stacklevel=1)
 CORS(app)
@@ -46,7 +46,7 @@ if not app.debug:
     
     # File handler with rotation
     file_handler = RotatingFileHandler(
-        'logs/soaring_cup.log',
+        'logs/glideplan.log',
         maxBytes=10485760,  # 10MB
         backupCount=10
     )
@@ -57,7 +57,7 @@ if not app.debug:
     app.logger.addHandler(file_handler)
     
     app.logger.setLevel(logging.INFO)
-    app.logger.info('Soaring CUP Web startup')
+    app.logger.info('GlidePlan startup')
 
 # Ensure directories exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -959,12 +959,31 @@ def share_page(token):
         expires_str = expires_dt.strftime('%d %b %Y %H:%M')
         waypoint_names = [wp['name'] for wp in share_data['task_waypoints']]
 
+        # Compute leg distances (haversine) between consecutive waypoints
+        import math
+        def _haversine_km(lat1, lon1, lat2, lon2):
+            R = 6371.0
+            dlat = math.radians(lat2 - lat1)
+            dlon = math.radians(lon2 - lon1)
+            a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+            return R * 2 * math.asin(math.sqrt(a))
+        wps = share_data['task_waypoints']
+        leg_distances = [None]  # first point has no inbound leg
+        for i in range(1, len(wps)):
+            try:
+                d = _haversine_km(wps[i-1]['latitude'], wps[i-1]['longitude'],
+                                  wps[i]['latitude'], wps[i]['longitude'])
+                leg_distances.append(round(d, 1))
+            except Exception:
+                leg_distances.append(None)
+
         return render_template('share.html',
                                expired=False,
                                task_name=share_data['task_name'],
                                token=token,
                                qr_data_url=qr_data_url,
                                waypoint_names=waypoint_names,
+                               leg_distances=leg_distances,
                                expires_str=expires_str)
     except Exception as e:
         app.logger.error(f"Share page error {token}: {e}")

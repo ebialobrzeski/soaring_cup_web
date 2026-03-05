@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
-# Simple startup script for Soaring CUP Web Editor
+# Simple startup script for GlidePlan
 
-Write-Host "Starting Soaring CUP Web Editor..." -ForegroundColor Green
+Write-Host "Starting GlidePlan..." -ForegroundColor Green
 
 # Check if Python is available
 try {

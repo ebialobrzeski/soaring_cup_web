@@ -30,6 +30,7 @@ class TaskPlanner {
         this._onBearingClick = null; // Bound click handler ref
         this.airspaces = [];        // Parsed airspace objects
         this.airspaceLayer = null;  // L.layerGroup for airspace polygons
+        this.airspaceAltMin = 0;       // feet — altitude filter floor
         this.airspaceAltFilter = 10000; // feet — altitude filter ceiling
     }
 
@@ -121,6 +122,19 @@ class TaskPlanner {
         document.getElementById('oz-save-btn').addEventListener('click', () => this.saveOZ());
         document.getElementById('oz-preset').addEventListener('change', (e) => this.applyPreset(e.target.value));
 
+        // OZ info popup
+        document.getElementById('oz-info-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleOZInfoPopup();
+        });
+        document.getElementById('oz-info-close').addEventListener('click', () => this.hideOZInfoPopup());
+        document.addEventListener('click', (e) => {
+            const popup = document.getElementById('oz-info-popup');
+            if (popup.style.display !== 'none' && !popup.contains(e.target) && e.target.id !== 'oz-info-btn') {
+                this.hideOZInfoPopup();
+            }
+        });
+
         // Direction mode toggle in OZ modal
         document.getElementById('oz-direction-mode').addEventListener('change', (e) => {
             document.getElementById('oz-bearing').disabled = (e.target.value === 'auto');
@@ -154,11 +168,24 @@ class TaskPlanner {
                 document.getElementById('airspace-filter-panel').style.display = 'none';
                 document.getElementById('airspace-clear-btn').style.display = 'none';
             });
-            document.getElementById('airspace-alt-slider').addEventListener('input', (e) => {
-                this.airspaceAltFilter = parseInt(e.target.value);
-                document.getElementById('airspace-alt-label').textContent = this.formatAlt(this.airspaceAltFilter);
+            const updateAltSliders = () => {
+                let minVal = parseInt(document.getElementById('airspace-alt-min-slider').value);
+                let maxVal = parseInt(document.getElementById('airspace-alt-max-slider').value);
+                if (minVal > maxVal) {
+                    // Swap so min never exceeds max
+                    document.getElementById('airspace-alt-min-slider').value = maxVal;
+                    document.getElementById('airspace-alt-max-slider').value = minVal;
+                    [minVal, maxVal] = [maxVal, minVal];
+                }
+                this.airspaceAltMin = minVal;
+                this.airspaceAltFilter = maxVal;
+                document.getElementById('airspace-alt-label').textContent =
+                    this.formatAlt(minVal) + '\u2013' + this.formatAlt(maxVal);
+                this._updateAltFill();
                 this.renderAirspaces();
-            });
+            };
+            document.getElementById('airspace-alt-min-slider').addEventListener('input', updateAltSliders);
+            document.getElementById('airspace-alt-max-slider').addEventListener('input', updateAltSliders);
 
             // XCSoar repository button
             document.getElementById('xcsoar-repo-btn').addEventListener('click', () => this.openRepoModal('airspace'));
@@ -385,6 +412,19 @@ class TaskPlanner {
         this.editIndex = -1;
     }
 
+    toggleOZInfoPopup() {
+        const popup = document.getElementById('oz-info-popup');
+        if (popup.style.display === 'none') {
+            popup.style.display = 'flex';
+        } else {
+            popup.style.display = 'none';
+        }
+    }
+
+    hideOZInfoPopup() {
+        document.getElementById('oz-info-popup').style.display = 'none';
+    }
+
     saveOZ() {
         if (this.editIndex < 0) return;
         const oz = this.taskPoints[this.editIndex].obsZone;
@@ -419,6 +459,10 @@ class TaskPlanner {
                 r1.value = 3000; a1.value = 45; r2.value = 500; a2.value = 180; break;
             case 'keyhole':
                 r1.value = 10000; a1.value = 45; r2.value = 500; a2.value = 180; break;
+            case 'bga-fixed-course':
+                r1.value = 20000; a1.value = 45; r2.value = 500; a2.value = 180; break;
+            case 'bga-enhanced':
+                r1.value = 10000; a1.value = 90; r2.value = 500; a2.value = 180; break;
             case 'start-line':
                 r1.value = 5000; a1.value = 90; r2.value = 0; a2.value = 180; break;
             case 'finish-line':
@@ -429,7 +473,9 @@ class TaskPlanner {
     guessPreset(oz) {
         if (oz.a1 === 180 && oz.r2 === 0) return 'cylinder';
         if (oz.a1 === 45 && oz.r2 === 500 && oz.r1 >= 2000 && oz.r1 <= 5000) return 'fai-sector';
-        if (oz.a1 === 45 && oz.r2 === 500 && oz.r1 >= 8000) return 'keyhole';
+        if (oz.a1 === 45 && oz.r2 === 500 && oz.r1 >= 8000 && oz.r1 <= 15000) return 'keyhole';
+        if (oz.a1 === 45 && oz.r2 === 500 && oz.r1 > 15000) return 'bga-fixed-course';
+        if (oz.a1 === 90 && oz.r2 === 500) return 'bga-enhanced';
         if (oz.a1 === 90 && oz.r2 === 0 && oz.r1 >= 3000) return 'start-line';
         if (oz.a1 === 90 && oz.r2 === 0 && oz.r1 <= 2000) return 'finish-line';
         return 'custom';
@@ -499,6 +545,8 @@ class TaskPlanner {
             'cylinder': 'Cylinder',
             'fai-sector': 'FAI Sector',
             'keyhole': 'BGA Keyhole',
+            'bga-fixed-course': 'BGA Fixed Course',
+            'bga-enhanced': 'BGA Enhanced Option',
             'start-line': 'Start Line',
             'finish-line': 'Finish Line',
             'custom': 'Custom'
@@ -1321,6 +1369,7 @@ class TaskPlanner {
                 document.getElementById('airspace-count').textContent = this.airspaces.length + ' zones';
                 document.getElementById('airspace-filter-panel').style.display = '';
                 document.getElementById('airspace-clear-btn').style.display = '';
+                this._updateAltFill();
                 this.renderAirspaces();
             } catch (err) {
                 alert('Failed to parse airspace file: ' + err.message);
@@ -1407,6 +1456,16 @@ class TaskPlanner {
         return                                        { color: '#64748b', fillOpacity: 0.05 };
     }
 
+    _updateAltFill() {
+        const fill = document.getElementById('airspace-alt-fill');
+        if (!fill) return;
+        const sliderMin = 0, sliderMax = 25000;
+        const lo = (this.airspaceAltMin - sliderMin) / (sliderMax - sliderMin) * 100;
+        const hi = (this.airspaceAltFilter - sliderMin) / (sliderMax - sliderMin) * 100;
+        fill.style.left = lo + '%';
+        fill.style.width = (hi - lo) + '%';
+    }
+
     renderAirspaces() {
         if (!this.initialized || !this.airspaceLayer) return;
         this.airspaceLayer.clearLayers();
@@ -1414,6 +1473,7 @@ class TaskPlanner {
             this.map.off('mousemove', this._airspaceMoveHandler);
             this._airspaceMoveHandler = null;
         }
+        const minAlt = this.airspaceAltMin;
         const maxAlt = this.airspaceAltFilter;
 
         // Create shared floating tooltip element (once)
@@ -1429,7 +1489,7 @@ class TaskPlanner {
         const allLayers = [];
 
         for (const as of this.airspaces) {
-            if (as.altLower > maxAlt) continue;
+            if (as.altUpper < minAlt || as.altLower > maxAlt) continue;
             const s = this.getAirspaceStyle(as.cls);
             const baseOpts = { color: s.color, weight: 1.5, opacity: 0.85, fillColor: s.color, fillOpacity: s.fillOpacity, interactive: false, bubblingMouseEvents: false };
 

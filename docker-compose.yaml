@@ -1,9 +1,9 @@
 version: '3.8'
 
 services:
-  soaring-cup-web:
+  glideplan:
     build: .
-    container_name: soaring_cup_web
+    container_name: glideplan
     restart: unless-stopped
     ports:
       - "5000:5000"
@@ -16,8 +16,8 @@ services:
       - FLASK_ENV=production
       - SECRET_KEY=${SECRET_KEY:-change_this_secret_key_in_production}
     networks:
-      - soaring-network
+      - glideplan-network
 
 networks:
-  soaring-network:
+  glideplan-network:
     driver: bridge

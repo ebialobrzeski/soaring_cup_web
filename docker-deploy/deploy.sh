@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# Soaring CUP Web - Deployment Script
+# GlidePlan - Deployment Script
 # This script automates the deployment process
 
 set -e  # Exit on error
 
-echo "🚀 Soaring CUP Web - Deployment Script"
-echo "======================================="
+echo "🚀 GlidePlan - Deployment Script"
+echo "================================"
 echo ""
 
 # Colors for output

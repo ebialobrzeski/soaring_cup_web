@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Soaring CUP File Editor</title>
+    <title>GlidePlan</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
@@ -27,8 +27,8 @@
         <div class="header-row">
             <div class="header-spacer"></div>
             <header>
-                <h1><i class="fas fa-plane"></i> Soaring CUP File Editor</h1>
-                <p>Edit and manage waypoint files for soaring and gliding</p>
+                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="GlidePlan" class="site-logo">
+                <p>Plan, edit and share soaring tasks &amp; waypoint files</p>
             </header>
             <div class="coffee-banner">
                 <a href="https://www.buymeacoffee.com/emil.b" target="_blank" rel="noopener noreferrer">
@@ -129,8 +129,13 @@
                                 <span id="airspace-count" class="airspace-count"></span>
                             </div>
                             <div class="airspace-slider-row">
-                                <label>Alt&nbsp;max:&nbsp;<strong id="airspace-alt-label">FL100</strong></label>
-                                <input type="range" id="airspace-alt-slider" class="airspace-slider" min="0" max="25000" step="500" value="10000">
+                                <label>Alt:&nbsp;<strong id="airspace-alt-label">0–FL100</strong></label>
+                                <div class="dual-range-wrap">
+                                    <div class="dual-range-track-bg"></div>
+                                    <div class="dual-range-fill" id="airspace-alt-fill"></div>
+                                    <input type="range" id="airspace-alt-min-slider" class="dual-range" min="0" max="25000" step="500" value="0">
+                                    <input type="range" id="airspace-alt-max-slider" class="dual-range" min="0" max="25000" step="500" value="10000">
+                                </div>
                             </div>
                         </div>
 
@@ -156,17 +161,17 @@
 
                         <!-- Task name + options in one compact block -->
                         <div class="task-meta-block">
-                            <input type="text" id="task-name" class="task-name-input" value="Task 1" placeholder="Task name">
-                            <details class="task-options-details">
+                            <input type="text" id="task-name" class="task-name-input" value="Task 1" placeholder="Task name"{% if view_mode %} readonly{% endif %}>
+                            <details class="task-options-details"{% if view_mode %} open style="pointer-events:none;opacity:.7"{% endif %}>
                                 <summary><i class="fas fa-cog"></i> Options</summary>
                                 <div class="task-options-body">
                                     <div class="task-options-row">
                                         <label for="task-no-start">No start before (UTC)</label>
-                                        <input type="time" id="task-no-start" value="12:00">
+                                        <input type="time" id="task-no-start" value="12:00"{% if view_mode %} readonly disabled{% endif %}>
                                     </div>
                                     <div class="task-options-row">
                                         <label for="task-time">Task time</label>
-                                        <input type="text" id="task-time" value="03:00:00" placeholder="HH:MM:SS">
+                                        <input type="text" id="task-time" value="03:00:00" placeholder="HH:MM:SS"{% if view_mode %} readonly disabled{% endif %}>
                                     </div>
                                 </div>
                             </details>
@@ -492,11 +497,13 @@
             </div>
             <div style="padding:25px;">
                 <div class="form-group">
-                    <label for="oz-preset">Zone Preset</label>
+                    <label for="oz-preset">Zone Preset <button type="button" id="oz-info-btn" class="oz-info-btn" title="Observation zone app compatibility"><i class="fas fa-info-circle"></i></button></label>
                     <select id="oz-preset">
                         <option value="cylinder">Cylinder</option>
-                        <option value="fai-sector">FAI Sector (90° / 20km + 500m cylinder)</option>
-                        <option value="keyhole">BGA Keyhole (90° / 10km + 500m cylinder)</option>
+                        <option value="fai-sector">FAI Sector (45° / 3km + 500m inner)</option>
+                        <option value="keyhole">BGA Keyhole (45° / 10km + 500m inner)</option>
+                        <option value="bga-fixed-course">BGA Fixed Course (45° / 20km + 500m inner)</option>
+                        <option value="bga-enhanced">BGA Enhanced Option (90° / 10km + 500m inner)</option>
                         <option value="start-line">Start Line</option>
                         <option value="finish-line">Finish Line</option>
                         <option value="custom">Custom</option>
@@ -542,6 +549,90 @@
                     <button type="button" id="oz-cancel-btn" class="btn btn-secondary">Cancel</button>
                     <button type="button" id="oz-save-btn" class="btn btn-primary">Save</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- OZ Info Popup -->
+    <div id="oz-info-popup" class="oz-info-popup" style="display:none;">
+        <div class="oz-info-popup-inner">
+            <div class="oz-info-header">
+                <strong>Observation Zone App Compatibility</strong>
+                <button type="button" id="oz-info-close" class="oz-info-close">&times;</button>
+            </div>
+            <div class="oz-info-body">
+                <p class="oz-info-note">Zones are saved in CUP format with R1/A1/R2/A2 fields. Compatibility when sharing via different formats:</p>
+                <table class="oz-compat-table">
+                    <thead>
+                        <tr>
+                            <th>Preset</th>
+                            <th>Params</th>
+                            <th>SeeYou</th>
+                            <th>XCSoar (CUP)</th>
+                            <th>LK8000 (CUP)</th>
+                            <th>XCTSK QR</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Cylinder</strong></td>
+                            <td>A1=180°, R2=0</td>
+                            <td>Cylinder</td>
+                            <td>CylinderZone</td>
+                            <td>CIRCLE</td>
+                            <td class="compat-ok">✓ Full</td>
+                        </tr>
+                        <tr>
+                            <td><strong>FAI Sector</strong></td>
+                            <td>A1=45°, R1=3km, R2=500m</td>
+                            <td>FAI Sector</td>
+                            <td>CustomKeyhole</td>
+                            <td>DAe sector</td>
+                            <td class="compat-warn">⚠ Outer circle only</td>
+                        </tr>
+                        <tr>
+                            <td><strong>BGA Keyhole</strong></td>
+                            <td>A1=45°, R1=10km, R2=500m</td>
+                            <td>BGA Keyhole</td>
+                            <td>BgaKeyholeZone</td>
+                            <td>DAe sector</td>
+                            <td class="compat-warn">⚠ Outer circle only</td>
+                        </tr>
+                        <tr>
+                            <td><strong>BGA Fixed Course</strong></td>
+                            <td>A1=45°, R1=20km, R2=500m</td>
+                            <td>BGA Fixed Course</td>
+                            <td>BGAFixedCourse</td>
+                            <td>DAe sector</td>
+                            <td class="compat-warn">⚠ Outer circle only</td>
+                        </tr>
+                        <tr>
+                            <td><strong>BGA Enhanced Option</strong></td>
+                            <td>A1=90°, R1=10km, R2=500m</td>
+                            <td>BGA Enhanced</td>
+                            <td>BGAEnhancedOption</td>
+                            <td>DAe sector</td>
+                            <td class="compat-warn">⚠ Outer circle only</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Start Line</strong></td>
+                            <td>Line, A1=90°, R2=0</td>
+                            <td>Start Line</td>
+                            <td>LineSectorZone</td>
+                            <td>LINE</td>
+                            <td class="compat-warn">⚠ Circle (ignored)</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Finish Line</strong></td>
+                            <td>Line, A1=90°, R2=0</td>
+                            <td>Finish Line</td>
+                            <td>LineSectorZone</td>
+                            <td>LINE</td>
+                            <td class="compat-ok">✓ LINE (LK8000)</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p class="oz-info-note">⚠ XCTSK QR v2 supports sector angle (A1) and line flag only — inner radius (R2) is not transmitted. All apps use CUP file for full fidelity.</p>
             </div>
         </div>
     </div>

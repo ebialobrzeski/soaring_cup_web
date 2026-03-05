@@ -1,7 +1,7 @@
 @echo off
-REM Simple startup script for Soaring CUP Web Editor
+REM Simple startup script for GlidePlan
 
-echo Starting Soaring CUP Web Editor...
+echo Starting GlidePlan...
 
 REM Check if Python is available
 python --version >nul 2>&1

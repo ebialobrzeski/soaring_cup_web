@@ -1,4 +1,4 @@
-# Quick Reference Commands for Soaring CUP Web
+# Quick Reference Commands for GlidePlan
 
 ## Application Commands
 

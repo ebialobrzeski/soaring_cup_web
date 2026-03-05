@@ -1,4 +1,4 @@
-// Soaring CUP File Editor - Web Application JavaScript
+// GlidePlan - Web Application JavaScript
 
 class SoaringCupEditor {
     constructor() {
@@ -49,64 +49,61 @@ class SoaringCupEditor {
     }
 
     setupEventListeners() {
-        // File operations
-        document.getElementById('file-upload').addEventListener('change', (e) => this.handleFileUpload(e));
-        document.getElementById('new-btn').addEventListener('click', () => this.newFile());
-        document.getElementById('save-cup-btn').addEventListener('click', () => this.downloadFile('cup'));
-
-        // Waypoint operations
-        document.getElementById('add-waypoint-btn').addEventListener('click', () => this.showWaypointModal());
-        document.getElementById('edit-waypoint-btn').addEventListener('click', () => this.editSelectedWaypoint());
-        document.getElementById('delete-waypoint-btn').addEventListener('click', () => this.deleteSelectedWaypoints());
-
-        // Table interactions
-        document.getElementById('select-all').addEventListener('change', (e) => this.toggleSelectAll(e.target.checked));
-        
-        // Table sorting
-        document.querySelectorAll('[data-sort]').forEach(th => {
-            th.addEventListener('click', () => this.sortTable(th.dataset.sort));
-        });
+        // File operations (not present in view mode)
+        if (!window.VIEW_MODE) {
+            document.getElementById('file-upload').addEventListener('change', (e) => this.handleFileUpload(e));
+            document.getElementById('new-btn').addEventListener('click', () => this.newFile());
+            document.getElementById('save-cup-btn').addEventListener('click', () => this.downloadFile('cup'));
+        }
 
         // Tab navigation
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.addEventListener('click', () => this.switchTab(btn.dataset.tab));
         });
 
-        // Modal tab navigation
-        document.querySelectorAll('.modal-tab-btn').forEach(btn => {
-            btn.addEventListener('click', () => this.switchModalTab(btn.dataset.modalTab));
-        });
-
-        // Modal
-        document.getElementById('modal-close').addEventListener('click', () => this.hideWaypointModal());
-        document.getElementById('cancel-btn').addEventListener('click', () => this.hideWaypointModal());
-        document.getElementById('waypoint-form').addEventListener('submit', (e) => this.handleWaypointSubmit(e));
-        document.getElementById('fetch-elevation-btn').addEventListener('click', () => this.fetchElevation());
-        document.getElementById('paste-coords-btn').addEventListener('click', () => this.pasteCoordinates());
-
-        // Map controls
+        // Map controls (present in both modes)
         document.getElementById('fit-bounds-btn').addEventListener('click', () => this.fitMapBounds());
         document.getElementById('add-waypoint-map-btn').addEventListener('click', () => this.addWaypointOnMap());
         document.getElementById('show-legend-btn').addEventListener('click', () => this.showLegendModal());
 
-        // Legend modal
+        // Legend modal (present in both modes)
         document.getElementById('legend-close').addEventListener('click', () => this.hideLegendModal());
-
-        // Close modal when clicking outside
-        document.getElementById('waypoint-modal').addEventListener('click', (e) => {
-            if (e.target.id === 'waypoint-modal') {
-                this.hideWaypointModal();
-            }
-        });
-
         document.getElementById('legend-modal').addEventListener('click', (e) => {
-            if (e.target.id === 'legend-modal') {
-                this.hideLegendModal();
-            }
+            if (e.target.id === 'legend-modal') this.hideLegendModal();
         });
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => this.handleKeyboardShortcuts(e));
+
+        if (!window.VIEW_MODE) {
+            // Waypoint operations
+            document.getElementById('add-waypoint-btn').addEventListener('click', () => this.showWaypointModal());
+            document.getElementById('edit-waypoint-btn').addEventListener('click', () => this.editSelectedWaypoint());
+            document.getElementById('delete-waypoint-btn').addEventListener('click', () => this.deleteSelectedWaypoints());
+
+            // Table interactions
+            document.getElementById('select-all').addEventListener('change', (e) => this.toggleSelectAll(e.target.checked));
+
+            // Table sorting
+            document.querySelectorAll('[data-sort]').forEach(th => {
+                th.addEventListener('click', () => this.sortTable(th.dataset.sort));
+            });
+
+            // Modal tab navigation
+            document.querySelectorAll('.modal-tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => this.switchModalTab(btn.dataset.modalTab));
+            });
+
+            // Waypoint modal
+            document.getElementById('modal-close').addEventListener('click', () => this.hideWaypointModal());
+            document.getElementById('cancel-btn').addEventListener('click', () => this.hideWaypointModal());
+            document.getElementById('waypoint-form').addEventListener('submit', (e) => this.handleWaypointSubmit(e));
+            document.getElementById('fetch-elevation-btn').addEventListener('click', () => this.fetchElevation());
+            document.getElementById('paste-coords-btn').addEventListener('click', () => this.pasteCoordinates());
+            document.getElementById('waypoint-modal').addEventListener('click', (e) => {
+                if (e.target.id === 'waypoint-modal') this.hideWaypointModal();
+            });
+        }
     }
 
     setupResizeHandler() {
@@ -739,6 +736,7 @@ class SoaringCupEditor {
     }
 
     updateTable() {
+        if (window.VIEW_MODE) return;
         const tbody = document.getElementById('waypoints-tbody');
         tbody.innerHTML = '';
 
@@ -858,6 +856,7 @@ class SoaringCupEditor {
     }
 
     updateActionButtons() {
+        if (window.VIEW_MODE) return;
         const hasWaypoints = this.waypoints.length > 0;
         const hasSelection = this.selectedWaypoints.size > 0;
         const singleSelection = this.selectedWaypoints.size === 1;

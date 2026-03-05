@@ -1,4 +1,4 @@
-# Soaring CUP Web — Development Session Notes
+# GlidePlan — Development Session Notes
 
 > Last updated: March 4, 2026
 

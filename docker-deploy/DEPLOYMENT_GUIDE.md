@@ -1,8 +1,8 @@
-# 🚀 Soaring CUP Web - Docker Deployment Guide
+# 🚀 GlidePlan - Docker Deployment Guide
 
 ## Quick Start for Raspberry Pi 4
 
-Simple deployment guide for running the Soaring CUP Web application in Docker.
+Simple deployment guide for running the GlidePlan application in Docker.
 
 ---
 

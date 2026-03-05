@@ -1,4 +1,4 @@
-# Soaring CUP File Editor - Web Application
+# GlidePlan
 
 A modern web-based application for editing and managing waypoint files in SeeYou CUP format, commonly used in soaring and gliding. This application has been converted from a desktop Tkinter application to a full web interface.
 
