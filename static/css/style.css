@@ -38,44 +38,61 @@ body {
 }
 
 /* Header row: title centered, QR anchored to the right */
-.header-row {
+.modern-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 30px;
+    margin-bottom: 20px;
+    padding: 16px 20px;
+    background: var(--surface);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
 }
 
-.header-spacer {
-    flex: 1;
-}
-
-header {
-    text-align: center;
-    flex: 1;
-    margin-bottom: 0;
-}
-
-/* Buy Me a Coffee Banner */
-.coffee-banner {
-    flex: 1;
+.header-brand {
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
+    gap: 16px;
 }
 
-.coffee-banner a {
-    display: inline-flex;
-    flex-direction: column;
+.header-text h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 0;
+    color: var(--text-primary);
+}
+
+.header-text p {
+    font-size: 0.9rem;
+    margin: 0;
+    color: var(--text-secondary);
+}
+
+.header-toolbar {
+    display: flex;
     align-items: center;
     gap: 8px;
+}
+
+.header-support-btn {
     text-decoration: none;
-    padding: 12px 20px;
-    border-radius: 12px;
-    background-color: #FFDD00;
-    color: #1a1a1a;
-    font-weight: 600;
-    font-size: 1rem;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    font-size: 1.1rem;
+}
+
+.header-support-btn sl-button::part(base) {
+    font-size: 1.05rem;
+}
+
+.header-support-btn sl-icon {
+    font-size: 1.25rem;
+}
+
+/* Old header styles removed */
+.header-row,
+.header-spacer,
+header,
+.coffee-banner {
+    display: none;
 }
 
 .coffee-banner a:hover {
@@ -131,71 +148,7 @@ header p {
     flex-wrap: wrap;
 }
 
-/* Buttons */
-.btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 16px;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    text-decoration: none;
-    transition: all 0.2s ease;
-    white-space: nowrap;
-}
-
-.btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-}
-
-.btn-primary {
-    background-color: var(--primary-color);
-    color: white;
-}
-
-.btn-primary:hover:not(:disabled) {
-    background-color: var(--primary-hover);
-}
-
-.btn-success {
-    background-color: var(--success-color);
-    color: white;
-}
-
-.btn-success:hover:not(:disabled) {
-    background-color: var(--success-hover);
-}
-
-.btn-danger {
-    background-color: var(--danger-color);
-    color: white;
-}
-
-.btn-danger:hover:not(:disabled) {
-    background-color: var(--danger-hover);
-}
-
-.btn-secondary {
-    background-color: var(--secondary-color);
-    color: white;
-}
-
-.btn-secondary:hover:not(:disabled) {
-    background-color: var(--secondary-hover);
-}
-
-.btn-share {
-    background-color: #0891b2;
-    color: white;
-}
-
-.btn-share:hover:not(:disabled) {
-    background-color: #0e7490;
-}
+/* Buttons — handled by Shoelace <sl-button> */
 
 /* View-mode: read-only shared task banner */
 .view-mode-banner {
@@ -220,92 +173,110 @@ header p {
 /* Hide editor chrome in view mode */
 body.view-mode .sidebar-file-row,
 body.view-mode #airspace-filter-panel,
-body.view-mode .wind-inline,
-body.view-mode .task-wp-search-wrap,
+body.view-mode .wind-card,
+body.view-mode .waypoint-search-card,
 body.view-mode #task-clear-btn,
 body.view-mode #task-share-btn {
     display: none !important;
 }
 
-.btn-sm {
-    padding: 6px 12px;
-    font-size: 12px;
-}
+/* Button sizes — handled by Shoelace <sl-button size="small"> */
 
 /* Status Bar */
 .status-bar {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    padding: 10px 16px;
     background: var(--surface);
-    padding: 10px 20px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    margin-bottom: 20px;
-    font-size: 14px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow);
 }
 
-#status-text {
-    color: var(--text-secondary);
+.modern-status {
+    gap: 12px;
 }
 
-#waypoint-count {
-    font-weight: 600;
-    color: var(--primary-color);
+#status-spinner {
+    animation: spin 1s linear infinite;
 }
 
-/* Tabs */
-.tab-nav {
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Map Toolbar */
+.map-toolbar {
     display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
     background: var(--surface);
-    border-radius: 8px 8px 0 0;
+    border-radius: 8px;
+    margin-bottom: 12px;
+    box-shadow: var(--shadow);
+    flex-wrap: wrap;
+}
+
+.map-toolbar sl-button-group {
+    flex-shrink: 0;
+}
+
+/* Old map-controls styles */
+.map-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.map-controls-divider {
+    width: 1px;
+    height: 24px;
+    background: var(--border);
+    margin: 0 8px;
+}
+
+/* Shoelace button group styling */
+sl-button-group::part(base) {
+    gap: 2px;
+}
+
+/* Shoelace divider in toolbar */
+sl-divider[vertical] {
+    height: 32px;
+}
+
+/* Shoelace tooltip */
+sl-tooltip {
+    --max-width: 200px;
+}
+
+/* Main Tabs */
+#main-tabs {
+    --indicator-color: var(--primary-color);
+}
+
+#main-tabs::part(base) {
+    background: var(--surface);
     border: 1px solid var(--border);
-    border-bottom: none;
+    border-radius: 8px;
     overflow: hidden;
 }
 
-.tab-btn {
-    padding: 15px 25px;
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    transition: all 0.2s ease;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.tab-btn:hover {
-    background-color: var(--background);
-    color: var(--text-primary);
-}
-
-.tab-btn.active {
-    background-color: var(--primary-color);
-    color: white;
-}
-
-.tab-content {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 0 0 8px 8px;
+#main-tabs::part(body) {
     min-height: 500px;
 }
 
-.tab-pane {
-    display: none;
+#main-tabs sl-tab-panel::part(base) {
     padding: 20px;
 }
 
-.tab-pane.active {
-    display: block;
-}
-
 /* Waypoint actions within list tab */
-.tab-pane .waypoint-actions {
+sl-tab-panel .waypoint-actions {
     margin-bottom: 20px;
     padding-bottom: 15px;
     border-bottom: 1px solid var(--border);
@@ -401,128 +372,29 @@ body.view-mode #task-share-btn {
     flex-shrink: 0;
 }
 
-/* Modal */
-.modal {
-    display: none;
-    position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.5);
-    animation: fadeIn 0.2s ease;
-}
-
-.modal.show {
-    display: block;
-}
-
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-.modal-content {
-    background-color: var(--surface);
-    margin: 2% auto;
-    padding: 0;
+/* Dialogs — handled by Shoelace <sl-dialog> */
+sl-dialog::part(panel) {
     border-radius: 8px;
-    width: 90%;
-    max-width: 700px;
-    max-height: 90vh;
-    overflow-y: auto;
-    box-shadow: var(--shadow-lg);
-    animation: slideIn 0.3s ease;
 }
 
-@keyframes slideIn {
-    from { transform: translateY(-50px); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
-}
-
-.modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+sl-dialog::part(body) {
     padding: 20px 25px;
-    border-bottom: 1px solid var(--border);
 }
 
-.modal-header h2 {
-    margin: 0;
-    color: var(--text-primary);
-}
-
-.close-btn {
-    background: none;
-    border: none;
-    font-size: 24px;
-    cursor: pointer;
-    color: var(--text-secondary);
-    padding: 0;
-    width: 30px;
-    height: 30px;
+sl-dialog::part(footer) {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 4px;
+    justify-content: flex-end;
+    gap: 10px;
 }
 
-.close-btn:hover {
-    background-color: var(--background);
-    color: var(--text-primary);
+/* Modal tabs — handled by Shoelace <sl-tab-group> inside dialogs */
+#modal-tabs {
+    --indicator-color: var(--primary-color);
+    margin-bottom: 10px;
 }
 
-/* Modal Tabs */
-.modal-tab-nav {
-    display: flex;
-    background: var(--background);
-    border-bottom: 1px solid var(--border);
-    overflow-x: auto;
-}
-
-.modal-tab-btn {
-    padding: 15px 20px;
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    transition: all 0.2s ease;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    white-space: nowrap;
-    border-bottom: 3px solid transparent;
-}
-
-.modal-tab-btn:hover {
-    background-color: var(--surface);
-    color: var(--text-primary);
-}
-
-.modal-tab-btn.active {
-    background-color: var(--surface);
-    color: var(--primary-color);
-    border-bottom-color: var(--primary-color);
-}
-
-.modal-tab-pane {
-    display: none;
-    padding: 25px;
-}
-
-.modal-tab-pane.active {
-    display: block;
-}
-
-.modal-tab-pane h3 {
-    margin: 0 0 20px 0;
-    color: var(--text-primary);
-    font-size: 1.1rem;
-    font-weight: 600;
+#modal-tabs sl-tab-panel::part(base) {
+    padding: 10px 0;
 }
 
 /* Form Groups in Modal */
@@ -547,7 +419,7 @@ body.view-mode #task-share-btn {
     min-width: 60px;
 }
 
-.waypoint-form .input-group .btn {
+.waypoint-form .input-group sl-button {
     white-space: nowrap;
 }
 
@@ -630,11 +502,9 @@ body.view-mode #task-share-btn {
     max-width: 60px;
 }
 
-.input-group .btn {
+.input-group sl-button {
     white-space: nowrap;
     flex: 0 0 auto;
-    padding: 8px 12px;
-    font-size: 12px;
 }
 
 .form-actions {
@@ -783,11 +653,6 @@ body.view-mode #task-share-btn {
         grid-template-columns: 1fr;
     }
     
-    .modal-content {
-        width: 95%;
-        margin: 2% auto;
-    }
-    
     .waypoints-table {
         font-size: 12px;
     }
@@ -803,8 +668,14 @@ body.view-mode #task-share-btn {
 .text-right { text-align: right; }
 .font-bold { font-weight: 600; }
 .text-success { color: var(--success-color); }
+.text-error { color: var(--danger-color); }
 .text-danger { color: var(--danger-color); }
 .text-secondary { color: var(--text-secondary); }
+.text-info { color: var(--text-secondary); }
+
+html.sl-theme-dark .text-success { color: #34d399; }
+html.sl-theme-dark .text-error,
+html.sl-theme-dark .text-danger { color: #f87171; }
 
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
@@ -844,12 +715,11 @@ body.view-mode #task-share-btn {
     color: var(--text-secondary);
 }
 
-.marker-popup .btn {
+.marker-popup sl-button {
     font-size: 12px;
-    padding: 6px 10px;
 }
 
-.marker-popup .btn i {
+.marker-popup sl-button i {
     font-size: 11px;
 }
 
@@ -1007,20 +877,13 @@ body.view-mode #task-share-btn {
 }
 
 .task-sidebar {
-    flex: 0 0 380px;
+    flex: 0 0 320px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    overflow-y: auto;
-}
-
-.task-sidebar h3 {
-    margin: 0;
-    font-size: 1.1rem;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--primary-color);
+    gap: 6px;
+    overflow: hidden;
+    min-height: 0;
+    padding-right: 2px;
 }
 
 /* File buttons row */
@@ -1030,7 +893,7 @@ body.view-mode #task-share-btn {
     align-items: center;
     flex-wrap: wrap;
 }
-.sidebar-file-row .btn { flex-shrink: 0; }
+.sidebar-file-row sl-button { flex-shrink: 0; }
 
 .task-map-area {
     flex: 1;
@@ -1085,13 +948,14 @@ body.view-mode #task-share-btn {
     font-size: 13px;
 }
 
-/* Task points list */
+/* Task points list — scrollable, takes remaining sidebar space */
 .task-points-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    max-height: 320px;
+    gap: 6px;
+    flex: 1 1 0;
     overflow-y: auto;
+    min-height: 60px;
 }
 
 .task-empty-msg {
@@ -1104,8 +968,8 @@ body.view-mode #task-share-btn {
 .task-point-card {
     background: var(--background);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 12px;
+    border-radius: 6px;
+    padding: 7px 10px;
 }
 
 .task-point-header {
@@ -1169,121 +1033,275 @@ body.view-mode #task-share-btn {
     align-items: flex-start;
 }
 
-/* Download dropdown */
-#task-download-dropdown {
-    position: relative;
-    display: inline-block;
-}
+/* Download dropdown — handled by Shoelace <sl-dropdown> */
 
-#task-download-menu {
-    display: none;
-    position: absolute;
-    top: 100%;
-    left: 0;
-    z-index: 1000;
-    min-width: 200px;
-    background: var(--bg-secondary, #fff);
-    border: 1px solid var(--border-color, #ccc);
-    border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    padding: 4px 0;
-    margin-top: 2px;
-}
-
-#task-download-menu.show {
-    display: block;
-}
-
-.dropdown-item {
-    display: block;
-    padding: 8px 14px;
-    font-size: 14px;
-    color: var(--text-primary, #333);
-    text-decoration: none;
-    white-space: nowrap;
-    cursor: pointer;
-    transition: background 0.15s;
-}
-
-.dropdown-item:hover {
-    background: var(--bg-hover, #f0f0f0);
-    color: var(--text-primary, #333);
-    text-decoration: none;
-}
-
-/* Compact task meta block (name + options) */
-.task-meta-block {
+/* Task section grouping */
+.task-section {
     display: flex;
     flex-direction: column;
-    gap: 0;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    overflow: hidden;
+    gap: 8px;
 }
-.task-name-input {
-    border: none;
-    border-bottom: 1px solid var(--border);
-    border-radius: 0;
-    padding: 8px 10px;
-    font-size: 14px;
+
+/* Shoelace Card customization — sl-card */
+sl-card {
+    --border-radius: 10px;
+    --border-width: 1px;
+    --border-color: var(--border);
+    --padding: 16px;
+}
+
+sl-card::part(header) {
+    padding: 8px 12px;
     font-weight: 600;
-    background: var(--surface);
-    width: 100%;
-    box-sizing: border-box;
-}
-.task-name-input:focus { outline: none; background: var(--background); }
-.task-options-details { background: var(--surface); }
-.task-options-details summary {
-    cursor: pointer;
-    padding: 6px 10px;
     font-size: 13px;
-    font-weight: 500;
+    border-bottom: 1px solid var(--border);
+}
+
+sl-card::part(body) {
+    padding: 10px 12px;
+}
+
+.card-header-with-icon {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.card-header-with-icon i {
+    color: var(--primary-color);
+    font-size: 15px;
+}
+
+/* Task Toolbar Card */
+.task-toolbar-card {
+    margin-bottom: 0;
+}
+
+.task-toolbar-card::part(body) {
+    padding: 8px 10px;
+}
+
+.task-toolbar-actions {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+/* Wind Card */
+.wind-card {
+    margin-bottom: 0;
+}
+
+.card-header-collapsible {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+}
+
+.card-header-collapsible .card-header-with-icon {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.card-header-collapsible sl-icon-button {
+    font-size: 14px;
     color: var(--text-secondary);
-    list-style: none;
+    transition: transform 0.2s ease;
+}
+
+.card-header-collapsible sl-icon-button.collapsed {
+    transform: rotate(-90deg);
+}
+
+.wind-fields-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 6px;
+}
+
+/* Task Details Card */
+.task-details-card {
+    margin-bottom: 0;
+}
+
+.task-name-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.task-name-row sl-input {
+    flex: 1;
+}
+
+.task-name-row sl-icon-button {
+    font-size: 16px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.task-advanced-panel {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+}
+
+.task-option-field {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.task-option-field:last-child {
+    margin-bottom: 0;
+}
+
+.task-option-field label {
     display: flex;
     align-items: center;
     gap: 6px;
-    user-select: none;
+    font-size: 13px;
+    color: var(--text-secondary);
+    white-space: nowrap;
 }
-.task-options-details summary::-webkit-details-marker { display: none; }
-.task-options-body {
-    padding: 8px 10px;
+
+.task-option-field label i {
+    font-size: 12px;
+    opacity: 0.7;
+}
+
+/* Waypoint Search Card */
+.waypoint-search-card {
+    margin-bottom: 0;
+}
+
+.search-hint {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 6px;
+    padding: 5px 8px;
+    background: var(--background);
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.75;
+}
+
+.search-hint sl-icon {
+    font-size: 14px;
+}
+
+/* Task Summary Card */
+.task-summary-card {
+    margin-bottom: 0;
+}
+
+.task-summary-stats {
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.task-stat {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    background: var(--background);
+    border-radius: 6px;
+    flex: 1 1 auto;
+    min-width: 70px;
+}
+
+.task-stat i {
+    font-size: 13px;
+    color: var(--primary-color);
+    width: 16px;
+    text-align: center;
+}
+
+.task-stat label {
+    display: block;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    margin-bottom: 1px;
+}
+
+.task-stat strong {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+/* Export Actions Card */
+.export-actions-card {
+    margin-bottom: 0;
+}
+
+.export-actions-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+}
+
+/* Wind fields (3-column grid of sl-inputs) */
+.wind-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+}
+
+/* Options (sl-details) */
+.task-options-grid {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    border-top: 1px solid var(--border);
+    gap: 10px;
 }
+
 .task-options-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 8px;
+    gap: 12px;
 }
-.task-options-row label { font-size: 12px; color: var(--text-secondary); }
-.task-options-row input { width: 110px; text-align: right; }
 
-/* Wind inline row (sidebar) */
-.wind-inline {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 10px;
-}
-.wind-inline-label {
-    font-size: 12px;
-    font-weight: 600;
+.task-options-row label {
+    font-size: 13px;
     color: var(--text-secondary);
     white-space: nowrap;
-    flex-shrink: 0;
 }
-.wind-inline-fields { display: flex; gap: 8px; flex: 1; }
-.wind-inline-field { display: flex; align-items: center; gap: 4px; flex: 1; }
-.wind-inline-field label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
-.wind-inline-field input { width: 100%; }
 
+/* Native time/text inputs styled to match Shoelace */
+.native-time-input {
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 14px;
+    font-family: inherit;
+    background: var(--surface);
+    color: var(--text-primary);
+    text-align: right;
+    width: 130px;
+}
+
+.native-time-input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
 /* Wind map control (Leaflet bottom-left) */
 .wind-map-control {
     background: rgba(255,255,255,0.92);
@@ -1410,8 +1428,8 @@ body.view-mode #task-share-btn {
     height: 16px;
     border-radius: 50%;
     background: var(--primary-color);
-    border: 2px solid #fff;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+    border: 2px solid var(--surface, #fff);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
     cursor: pointer;
     margin-top: -6px;
 }
@@ -1421,8 +1439,8 @@ body.view-mode #task-share-btn {
     height: 14px;
     border-radius: 50%;
     background: var(--primary-color);
-    border: 2px solid #fff;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+    border: 2px solid var(--surface, #fff);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
     cursor: pointer;
 }
 
@@ -1578,6 +1596,8 @@ body.view-mode #task-share-btn {
     }
     .task-sidebar {
         flex: none;
+        height: 60vh;
+        min-height: 300px;
     }
     .task-map-area .map-container {
         min-height: 350px;
@@ -1630,15 +1650,6 @@ body.view-mode #task-share-btn {
         font-size: 0.9rem;
     }
     
-    .btn {
-        padding: 8px 12px;
-        font-size: 13px;
-    }
-    
-    .modal-content {
-        width: 95%;
-        margin: 5% auto;
-    }
 }
 
 /* Extra small screens */
@@ -1656,15 +1667,6 @@ body.view-mode #task-share-btn {
         height: 65px;
     }
     
-    .btn {
-        padding: 6px 10px;
-        font-size: 12px;
-    }
-    
-    .tab-btn {
-        font-size: 12px;
-        padding: 8px 12px;
-    }
 }
 
 /* ──────────── XCSoar Repository Modal ──────────── */
@@ -1785,20 +1787,118 @@ body.view-mode #task-share-btn {
     font-size: 13px;
 }
 
-/* ── Confirmation Modal ────────────────────────── */
-.confirm-modal-content {
-    max-width: 420px;
+/* Confirmation dialog — handled by Shoelace <sl-dialog> */
+
+/* Share button (teal variant) */
+sl-button.share-btn::part(base) {
+    background-color: #0891b2;
+    border-color: #0891b2;
+    color: white;
+}
+sl-button.share-btn::part(base):hover {
+    background-color: #0e7490;
+    border-color: #0e7490;
 }
 
-.confirm-modal-body {
-    padding: 24px 25px;
+/* ── Theme Toggle ──────────────────────────────── */
+#theme-toggle {
+    font-size: 1.2rem;
 }
 
-.confirm-modal-body p {
-    margin-bottom: 24px;
+#theme-toggle i {
+    transition: transform 0.3s ease;
+}
+
+/* ── Dark Theme ────────────────────────────────── */
+html.sl-theme-dark {
+    --primary-color: #3b82f6;
+    --primary-hover: #2563eb;
+    --success-color: #10b981;
+    --success-hover: #059669;
+    --danger-color: #ef4444;
+    --danger-hover: #dc2626;
+    --secondary-color: #9ca3af;
+    --secondary-hover: #d1d5db;
+    --background: #0f172a;
+    --surface: #1e293b;
+    --border: #334155;
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4);
+}
+
+/* Dark theme: native inputs */
+html.sl-theme-dark input,
+html.sl-theme-dark select,
+html.sl-theme-dark textarea {
+    background-color: var(--surface);
     color: var(--text-primary);
-    font-size: 15px;
-    line-height: 1.5;
+    border-color: var(--border);
+}
+
+/* Range inputs must stay transparent so dual-range stacking works */
+html.sl-theme-dark input[type="range"].dual-range {
+    background-color: transparent !important;
+}
+
+/* Dark theme: coffee banner */
+html.sl-theme-dark .coffee-banner a {
+    background-color: #ca8a04;
+    color: #fff;
+}
+
+/* Dark theme: Leaflet map controls */
+html.sl-theme-dark .leaflet-control-zoom a,
+html.sl-theme-dark .leaflet-control-layers {
+    background-color: var(--surface);
+    color: var(--text-primary);
+    border-color: var(--border);
+}
+
+/* Dark theme: map popups */
+html.sl-theme-dark .leaflet-popup-content-wrapper,
+html.sl-theme-dark .leaflet-popup-tip {
+    background: var(--surface);
+    color: var(--text-primary);
+}
+
+/* Dark theme: wind map control */
+html.sl-theme-dark .wind-map-control {
+    background: rgba(30, 41, 59, 0.94);
+}
+
+/* Dark theme: form backgrounds */
+html.sl-theme-dark .form-group input,
+html.sl-theme-dark .form-group select,
+html.sl-theme-dark .form-group textarea {
+    background: var(--surface);
+    color: var(--text-primary);
+}
+
+/* Dark theme: waypoint table */
+html.sl-theme-dark .waypoints-table th {
+    background-color: var(--surface);
+}
+
+html.sl-theme-dark .waypoints-table tr:hover {
+    background-color: rgba(59, 130, 246, 0.1);
+}
+
+/* Dark theme: task point cards */
+html.sl-theme-dark .task-point-card {
+    background: var(--surface);
+}
+
+/* Dark theme: XCSoar repo badges */
+html.sl-theme-dark .xcsoar-badge-wp {
+    background: #1e3a5f;
+    color: #93c5fd;
+}
+
+html.sl-theme-dark .xcsoar-badge-as {
+    background: #14532d;
+    color: #86efac;
 }
 
 /* ── Site Footer ───────────────────────────────── */

@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GlidePlan &ndash; Soaring Task &amp; Waypoint Editor</title>
+    <meta name="description" content="Plan, edit and share soaring tasks and waypoint files. Free online tool for glider pilots.">
+    <!-- Open Graph -->
+    <meta property="og:title" content="GlidePlan &ndash; Soaring Task &amp; Waypoint Editor">
+    <meta property="og:description" content="Plan, edit and share soaring tasks and waypoint files. Free online tool for glider pilots.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="{{ request.host_url }}">
+    <meta property="og:image" content="{{ request.host_url }}static/images/icon-512.png">
+    <meta property="og:logo" content="{{ request.host_url }}static/images/icon-512.png">
+    <meta property="og:site_name" content="GlidePlan">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="GlidePlan &ndash; Soaring Task &amp; Waypoint Editor">
+    <meta name="twitter:description" content="Plan, edit and share soaring tasks and waypoint files. Free online tool for glider pilots.">
+    <meta name="twitter:image" content="{{ request.host_url }}static/images/icon-512.png">
+    <link rel="icon" href="{{ url_for('static', filename='images/favicon.ico') }}" sizes="any">
+    <link rel="icon" href="{{ url_for('static', filename='images/icon-192.png') }}" type="image/png" sizes="192x192">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='images/apple-touch-icon.png') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body{% if view_mode %} class="view-mode"{% endif %}>
+    {% if view_mode %}
+    <div class="view-mode-banner">
+        <i class="fas fa-eye"></i>
+        Read-only view &mdash; <strong>{{ view_task_name }}</strong>
+        &nbsp;&middot;&nbsp;
+        <a href="/"><i class="fas fa-edit"></i> Open Editor</a>
+    </div>
+    {% endif %}
+    <script>
+        window.VIEW_MODE = {{ view_mode | tojson }};
+        window.VIEW_TOKEN = {{ view_token | tojson }};
+    </script>
+    <div class="container">
+        <div class="header-row">
+            <div class="header-spacer"></div>
+            <header>
+                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="GlidePlan" class="site-logo">
+                <p>Plan, edit and share soaring tasks &amp; waypoint files</p>
+            </header>
+            <div class="coffee-banner">
+                <a href="https://www.buymeacoffee.com/emil.b" target="_blank" rel="noopener noreferrer">
+                    <img src="{{ url_for('static', filename='images/qr-buymeacoffee.png') }}" alt="Buy me a coffee QR code" class="coffee-qr">
+                    <span class="coffee-text">Like it? Buy me a coffee ☕</span>
+                </a>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div id="status-bar" class="status-bar">
+            <span id="status-text">Ready - No waypoints loaded</span>
+            <span id="waypoint-count">0 waypoints</span>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="tab-nav">
+            {% if not view_mode %}
+            <button class="tab-btn active" data-tab="map">
+                <i class="fas fa-map"></i> Map View
+            </button>
+            <button class="tab-btn" data-tab="list">
+                <i class="fas fa-list"></i> List View
+            </button>
+            {% endif %}
+            <button class="tab-btn{% if view_mode %} active{% endif %}" data-tab="task">
+                <i class="fas fa-route"></i> Task Planner
+            </button>
+        </div>
+
+        <!-- Tab Content -->
+        <div class="tab-content">
+            <!-- Map View Tab -->
+            <div id="map-tab" class="tab-pane{% if not view_mode %} active{% endif %}">
+                <div class="map-controls">
+                    {% if not view_mode %}
+                    <button id="new-btn" class="btn btn-primary">
+                        <i class="fas fa-file"></i> New
+                    </button>
+                    <label for="file-upload" class="btn btn-primary">
+                        <i class="fas fa-folder-open"></i> Open File
+                    </label>
+                    <input type="file" id="file-upload" accept=".cup,.csv" style="display: none;">
+                    <button id="save-cup-btn" class="btn btn-success" disabled>
+                        <i class="fas fa-save"></i> Save CUP
+                    </button>
+                    <span class="map-controls-divider"></span>
+                    {% endif %}
+                    <button id="fit-bounds-btn" class="btn btn-secondary">
+                        <i class="fas fa-expand-arrows-alt"></i> Fit All
+                    </button>
+                    <button id="add-waypoint-map-btn" class="btn btn-primary">
+                        <i class="fas fa-map-pin"></i> Add Waypoint on Map
+                    </button>
+                    <button id="show-legend-btn" class="btn btn-secondary">
+                        <i class="fas fa-info-circle"></i> Legend
+                    </button>
+                    {% if not view_mode %}
+                    <button id="xcsoar-repo-map-btn" class="btn btn-secondary" title="Browse XCSoar waypoint repository">
+                        <i class="fas fa-database"></i> Repository
+                    </button>
+                    {% endif %}
+                </div>
+                <div id="map" class="map-container"></div>
+            </div>
+
+            <!-- Task Planner Tab -->
+            <div id="task-tab" class="tab-pane{% if view_mode %} active{% endif %}">
+                <div class="task-planner">
+                    <div class="task-sidebar">
+                        <h3><i class="fas fa-route"></i> Task Planner</h3>
+
+                        <!-- File buttons row -->
+                        <div class="sidebar-file-row">
+                            <button id="task-open-btn" class="btn btn-secondary btn-sm">
+                                <i class="fas fa-folder-open"></i> Task
+                            </button>
+                            <input type="file" id="task-file-input" accept=".cup" style="display:none">
+                            {% if not view_mode %}
+                            <button id="airspace-open-btn" class="btn btn-secondary btn-sm">
+                                <i class="fas fa-shield-alt"></i> Airspace
+                            </button>
+                            <input type="file" id="airspace-file-input" accept=".txt,.openair,.air" style="display:none">
+                            <button id="airspace-clear-btn" class="btn btn-sm btn-light" style="display:none" title="Remove airspace">
+                                <i class="fas fa-times"></i>
+                            </button>
+                            <button id="xcsoar-repo-btn" class="btn btn-secondary btn-sm" title="Browse XCSoar data repository">
+                                <i class="fas fa-database"></i> Repository
+                            </button>
+                            {% endif %}
+                        </div>
+
+                        {% if not view_mode %}
+                        <!-- Airspace filter (shown after file load) -->
+                        <div id="airspace-filter-panel" class="airspace-filter-panel" style="display:none">
+                            <div class="airspace-filename-row">
+                                <span id="airspace-file-name" class="airspace-filename"></span>
+                                <span id="airspace-count" class="airspace-count"></span>
+                            </div>
+                            <div class="airspace-slider-row">
+                                <label>Alt:&nbsp;<strong id="airspace-alt-label">0–FL100</strong></label>
+                                <div class="dual-range-wrap">
+                                    <div class="dual-range-track-bg"></div>
+                                    <div class="dual-range-fill" id="airspace-alt-fill"></div>
+                                    <input type="range" id="airspace-alt-min-slider" class="dual-range" min="0" max="25000" step="500" value="0">
+                                    <input type="range" id="airspace-alt-max-slider" class="dual-range" min="0" max="25000" step="500" value="10000">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Wind inline row -->
+                        <div class="wind-inline">
+                            <span class="wind-inline-label"><i class="fas fa-wind"></i> Wind</span>
+                            <div class="wind-inline-fields">
+                                <div class="wind-inline-field">
+                                    <label for="task-wind-dir">&deg;</label>
+                                    <input type="number" id="task-wind-dir" min="0" max="360" value="0" placeholder="0">
+                                </div>
+                                <div class="wind-inline-field">
+                                    <label for="task-wind-speed">kt</label>
+                                    <input type="number" id="task-wind-speed" min="0" max="150" value="15" placeholder="15">
+                                </div>
+                                <div class="wind-inline-field">
+                                    <label for="task-tas">TAS&nbsp;km/h</label>
+                                    <input type="number" id="task-tas" min="0" max="400" value="100" placeholder="100">
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Task name + options in one compact block -->
+                        <div class="task-meta-block">
+                            <input type="text" id="task-name" class="task-name-input" value="Task 1" placeholder="Task name"{% if view_mode %} readonly{% endif %}>
+                            <details class="task-options-details"{% if view_mode %} open style="pointer-events:none;opacity:.7"{% endif %}>
+                                <summary><i class="fas fa-cog"></i> Options</summary>
+                                <div class="task-options-body">
+                                    <div class="task-options-row">
+                                        <label for="task-no-start">No start before (UTC)</label>
+                                        <input type="time" id="task-no-start" value="12:00"{% if view_mode %} readonly disabled{% endif %}>
+                                    </div>
+                                    <div class="task-options-row">
+                                        <label for="task-time">Task time</label>
+                                        <input type="text" id="task-time" value="03:00:00" placeholder="HH:MM:SS"{% if view_mode %} readonly disabled{% endif %}>
+                                    </div>
+                                </div>
+                            </details>
+                        </div>
+
+                        <!-- Search waypoints -->
+                        <div class="task-wp-search-wrap">
+                            <label class="task-wp-search-label">Add Waypoint</label>
+                            <div style="position:relative">
+                                <input type="text" id="task-wp-search" placeholder="Search waypoints..." autocomplete="off">
+                                <div id="task-wp-results" class="task-wp-results"></div>
+                            </div>
+                        </div>
+
+                        <!-- Task points list -->
+                        <div id="task-points-list" class="task-points-list">
+                            <p class="task-empty-msg">No task points added. Search and add waypoints above.</p>
+                        </div>
+
+                        <!-- Task summary -->
+                        <div id="task-summary" class="task-summary" style="display:none;">
+                            <div class="task-summary-row">
+                                <span>Total distance:</span>
+                                <strong id="task-total-distance">0 km</strong>
+                            </div>
+                            <div class="task-summary-row" id="task-total-time-row" style="display:none;">
+                                <span>Est. flight time:</span>
+                                <strong id="task-total-time">&mdash;</strong>
+                            </div>
+                            <div class="task-summary-row">
+                                <span>Legs:</span>
+                                <strong id="task-leg-count">0</strong>
+                            </div>
+                        </div>
+
+                        <!-- Export buttons -->
+                        <div class="task-export-actions">
+                            <div class="dropdown" id="task-download-dropdown">
+                                <button id="task-download-btn" class="btn btn-success dropdown-toggle" disabled
+                                        aria-haspopup="true" aria-expanded="false">
+                                    <i class="fas fa-download"></i> Download
+                                </button>
+                                <div class="dropdown-menu" id="task-download-menu">
+                                    <a class="dropdown-item" href="#" onclick="window.taskPlanner.downloadTask('cup'); return false;">SeeYou CUP (.cup)</a>
+                                    <a class="dropdown-item" href="#" onclick="window.taskPlanner.downloadTask('tsk'); return false;">XCSoar TSK (.tsk)</a>
+                                    <a class="dropdown-item" href="#" onclick="window.taskPlanner.downloadTask('lkt'); return false;">LK8000 LKT (.lkt)</a>
+                                    <a class="dropdown-item" href="#" onclick="window.taskPlanner.downloadTask('xctsk'); return false;">XCTrack XCTSK (.xctsk)</a>
+                                </div>
+                            </div>
+                            <button id="task-qr-btn" class="btn btn-primary" disabled>
+                                <i class="fas fa-qrcode"></i> XCTSK QR
+                            </button>
+                            <button id="task-share-btn" class="btn btn-share" disabled>
+                                <i class="fas fa-share-alt"></i> Share
+                            </button>
+                            <button id="task-clear-btn" class="btn btn-danger">
+                                <i class="fas fa-trash"></i> Clear Task
+                            </button>
+                        </div>
+                    </div>
+                    <div class="task-map-area">
+                        <div id="task-map" class="map-container"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- List View Tab -->
+            <div id="list-tab" class="tab-pane">
+                <div class="waypoint-actions">
+                    <button id="add-waypoint-btn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Add Waypoint
+                    </button>
+                    <button id="edit-waypoint-btn" class="btn btn-secondary" disabled>
+                        <i class="fas fa-edit"></i> Edit Selected
+                    </button>
+                    <button id="delete-waypoint-btn" class="btn btn-danger" disabled>
+                        <i class="fas fa-trash"></i> Delete Selected
+                    </button>
+                </div>
+                <div class="table-container">
+                    <table id="waypoints-table" class="waypoints-table">
+                        <thead>
+                            <tr>
+                                <th><input type="checkbox" id="select-all"></th>
+                                <th data-sort="name">Name <i class="fas fa-sort"></i></th>
+                                <th data-sort="code">Code <i class="fas fa-sort"></i></th>
+                                <th data-sort="country">Country <i class="fas fa-sort"></i></th>
+                                <th data-sort="latitude">Latitude <i class="fas fa-sort"></i></th>
+                                <th data-sort="longitude">Longitude <i class="fas fa-sort"></i></th>
+                                <th data-sort="elevation">Elevation <i class="fas fa-sort"></i></th>
+                                <th data-sort="style">Style <i class="fas fa-sort"></i></th>
+                                <th>Airfield</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="waypoints-tbody">
+                            <!-- Waypoints will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="site-footer">
+        <div class="site-footer-inner">
+            <span>GlidePlan &mdash; free tool for glider pilots</span>
+            <span class="footer-sep">&middot;</span>
+            <a href="https://www.buymeacoffee.com/emil.b" target="_blank" rel="noopener noreferrer">
+                <i class="fas fa-coffee"></i> Support this project
+            </a>
+        </div>
+    </footer>
+
+    <!-- Waypoint Edit Modal -->
+    <div id="waypoint-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">Add Waypoint</h2>
+                <button class="close-btn" id="modal-close">&times;</button>
+            </div>
+            
+            <!-- Tab Navigation for Modal -->
+            <div class="modal-tab-nav">
+                <button type="button" class="modal-tab-btn active" data-modal-tab="basic">
+                    <i class="fas fa-info-circle"></i> Basic Info
+                </button>
+                <button type="button" class="modal-tab-btn" data-modal-tab="airfield">
+                    <i class="fas fa-plane"></i> Airfield Info
+                </button>
+                <button type="button" class="modal-tab-btn" data-modal-tab="details">
+                    <i class="fas fa-file-text"></i> Details
+                </button>
+            </div>
+            
+            <form id="waypoint-form" class="waypoint-form">
+                <!-- Basic Info Tab -->
+                <div id="modal-basic-tab" class="modal-tab-pane active">
+                    <h3>Basic Information</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="wp-name">Name *</label>
+                            <input type="text" id="wp-name" name="name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="wp-code">Code</label>
+                            <input type="text" id="wp-code" name="code" placeholder="e.g., EPBK">
+                        </div>
+                        <div class="form-group">
+                            <label for="wp-country">Country</label>
+                            <input type="text" id="wp-country" name="country" maxlength="3" placeholder="e.g., PL, US">
+                        </div>
+                        <div class="form-group">
+                            <label>&nbsp;</label>
+                            <button type="button" id="paste-coords-btn" class="btn btn-secondary">
+                                <i class="fas fa-clipboard"></i> Paste Coords
+                            </button>
+                            <small>Paste: lat, lon from clipboard</small>
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="wp-latitude">Latitude *</label>
+                            <input type="number" id="wp-latitude" name="latitude" step="any" required placeholder="e.g., 52.7652">
+                            <small>Decimal degrees, positive = North</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="wp-longitude">Longitude *</label>
+                            <input type="number" id="wp-longitude" name="longitude" step="any" required placeholder="e.g., 23.1867">
+                            <small>Decimal degrees, positive = East</small>
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="wp-elevation-value">Elevation</label>
+                            <div class="input-group">
+                                <input type="number" id="wp-elevation-value" name="elevation_value" step="any" placeholder="504.0">
+                                <select id="wp-elevation-unit" name="elevation_unit">
+                                    <option value="m">m</option>
+                                    <option value="ft">ft</option>
+                                </select>
+                                <button type="button" id="fetch-elevation-btn" class="btn btn-sm">
+                                    <i class="fas fa-download"></i> Fetch
+                                </button>
+                            </div>
+                            <small>Leave empty to auto-fetch</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="wp-style">Style</label>
+                            <select id="wp-style" name="style">
+                                {% for value, label in style_options %}
+                                <option value="{{ value }}">{{ value }} - {{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Airfield Info Tab -->
+                <div id="modal-airfield-tab" class="modal-tab-pane">
+                    <h3>Airfield & Runway Information</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="wp-runway-direction">Runway Direction</label>
+                            <input type="text" id="wp-runway-direction" name="runway_direction" placeholder="070, 180, 270 or 115.050">
+                            <small>3-digit heading (000-359) or PG format (115.050)</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="wp-frequency">Radio Frequency</label>
+                            <input type="text" id="wp-frequency" name="frequency" placeholder="122.500">
+                            <small>MHz (100-150 typical aviation range)</small>
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="wp-runway-length-value">Runway Length</label>
+                            <div class="input-group">
+                                <input type="number" id="wp-runway-length-value" name="runway_length_value" step="any" placeholder="1200">
+                                <select id="wp-runway-length-unit" name="runway_length_unit">
+                                    <option value="m">m</option>
+                                    <option value="nm">nm</option>
+                                    <option value="ml">ml</option>
+                                </select>
+                            </div>
+                            <small>m=meters, nm=nautical miles, ml=statute miles</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="wp-runway-width-value">Runway Width</label>
+                            <div class="input-group">
+                                <input type="number" id="wp-runway-width-value" name="runway_width_value" step="any" placeholder="30">
+                                <select id="wp-runway-width-unit" name="runway_width_unit">
+                                    <option value="m">m</option>
+                                    <option value="nm">nm</option>
+                                    <option value="ml">ml</option>
+                                </select>
+                            </div>
+                            <small>m=meters, nm=nautical miles, ml=statute miles</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Details Tab -->
+                <div id="modal-details-tab" class="modal-tab-pane">
+                    <h3>Additional Information</h3>
+                    <div class="form-group">
+                        <label for="wp-description">Description</label>
+                        <textarea id="wp-description" name="description" rows="10" placeholder="Free text description or notes"></textarea>
+                        <small>Free text description or notes</small>
+                    </div>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" id="cancel-btn" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Waypoint</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Legend Modal -->
+    <div id="legend-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Waypoint Icon Legend</h2>
+                <button class="close-btn" id="legend-close">&times;</button>
+            </div>
+            <div class="legend-content">
+                <p>Different waypoint types are displayed with specific icons from XCSoar:</p>
+                <div id="legend-items"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task QR Modal -->
+    <div id="task-qr-modal" class="modal">
+        <div class="modal-content" style="max-width:480px;">
+            <div class="modal-header">
+                <h2>Task QR Code (XCTSK)</h2>
+                <button class="close-btn" id="task-qr-close">&times;</button>
+            </div>
+            <div class="task-qr-body">
+                <p>Scan with <strong>XCTrack</strong>, <strong>XCSoar</strong>, <strong>LK8000</strong>, or <strong>SeeYou Navigator</strong> to load the task directly.</p>
+                <div id="task-qr-canvas" class="task-qr-canvas"></div>
+                <div class="task-qr-actions">
+                    <button id="task-qr-download-img" class="btn btn-secondary">
+                        <i class="fas fa-image"></i> Save QR Image
+                    </button>
+                    <button id="task-qr-download-cup" class="btn btn-success">
+                        <i class="fas fa-download"></i> Download CUP
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Share Modal -->
+    <div id="share-modal" class="modal">
+        <div class="modal-content" style="max-width:460px;">
+            <div class="modal-header">
+                <h2><i class="fas fa-share-alt"></i> Share Task Link</h2>
+                <button class="close-btn" id="share-modal-close">&times;</button>
+            </div>
+            <div style="padding:24px;">
+                <p style="margin-bottom:16px; color:var(--text-secondary); font-size:14px; line-height:1.5;">
+                    <i class="fas fa-clock"></i>&nbsp; This link expires in <strong>24 hours</strong>.
+                    Anyone with it can view the QR code and download the task file.
+                </p>
+                <div class="input-group" style="margin-bottom:16px;">
+                    <input type="text" id="share-url-input" readonly
+                           style="font-size:13px; background:var(--background);">
+                    <button id="share-copy-btn" class="btn btn-primary" style="white-space:nowrap;">
+                        <i class="fas fa-copy"></i> Copy
+                    </button>
+                </div>
+                <div style="text-align:center;">
+                    <a id="share-open-link" href="#" target="_blank" rel="noopener" class="btn btn-secondary">
+                        <i class="fas fa-external-link-alt"></i> Open Link
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task Point Edit Modal -->
+    <div id="task-point-modal" class="modal">
+        <div class="modal-content" style="max-width:500px;">
+            <div class="modal-header">
+                <h2 id="task-point-modal-title">Edit Observation Zone</h2>
+                <button class="close-btn" id="task-point-modal-close">&times;</button>
+            </div>
+            <div style="padding:25px;">
+                <div class="form-group">
+                    <label for="oz-preset">Zone Preset <button type="button" id="oz-info-btn" class="oz-info-btn" title="Observation zone app compatibility"><i class="fas fa-info-circle"></i></button></label>
+                    <select id="oz-preset">
+                        <option value="cylinder">Cylinder</option>
+                        <option value="fai-sector">FAI Sector (45° / 3km + 500m inner)</option>
+                        <option value="keyhole">BGA Keyhole (45° / 10km + 500m inner)</option>
+                        <option value="bga-fixed-course">BGA Fixed Course (45° / 20km + 500m inner)</option>
+                        <option value="bga-enhanced">BGA Enhanced Option (90° / 10km + 500m inner)</option>
+                        <option value="start-line">Start Line</option>
+                        <option value="finish-line">Finish Line</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="oz-r1">Radius R1 (m)</label>
+                        <input type="number" id="oz-r1" value="500" min="0" step="100">
+                    </div>
+                    <div class="form-group">
+                        <label for="oz-a1">Angle A1 (°)</label>
+                        <input type="number" id="oz-a1" value="180" min="0" max="180" step="1">
+                        <small>180° = full cylinder, 90° = line, 45° = FAI sector</small>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="oz-r2">Inner Radius R2 (m)</label>
+                        <input type="number" id="oz-r2" value="0" min="0" step="100">
+                    </div>
+                    <div class="form-group">
+                        <label for="oz-a2">Inner Angle A2 (°)</label>
+                        <input type="number" id="oz-a2" value="180" min="0" max="180" step="1">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="oz-direction-mode">Sector Direction</label>
+                        <select id="oz-direction-mode">
+                            <option value="auto">Auto (from task legs)</option>
+                            <option value="fixed">Fixed bearing</option>
+                        </select>
+                        <small>Auto computes direction from adjacent legs</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="oz-bearing">Bearing (°)</label>
+                        <input type="number" id="oz-bearing" value="0" min="0" max="360" step="1" disabled>
+                        <small>0° = North, 90° = East, etc.</small>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" id="oz-cancel-btn" class="btn btn-secondary">Cancel</button>
+                    <button type="button" id="oz-save-btn" class="btn btn-primary">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- OZ Info Popup -->
+    <div id="oz-info-popup" class="oz-info-popup" style="display:none;">
+        <div class="oz-info-popup-inner">
+            <div class="oz-info-header">
+                <strong>Observation Zone App Compatibility</strong>
+                <button type="button" id="oz-info-close" class="oz-info-close">&times;</button>
+            </div>
+            <div class="oz-info-body">
+                <p class="oz-info-note">Zones are saved in CUP format with R1/A1/R2/A2 fields. Compatibility when sharing via different formats:</p>
+                <table class="oz-compat-table">
+                    <thead>
+                        <tr>
+                            <th>Preset</th>
+                            <th>Params</th>
+                            <th>SeeYou</th>
+                            <th>XCSoar (CUP)</th>
+                            <th>LK8000 (CUP)</th>
+                            <th>XCTSK QR</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Cylinder</strong></td>
+                            <td>A1=180°, R2=0</td>
+                            <td>Cylinder</td>
+                            <td>CylinderZone</td>
+                            <td>CIRCLE</td>
+                            <td class="compat-ok">✓ Full</td>
+                        </tr>
+                        <tr>
+                            <td><strong>FAI Sector</strong></td>
+                            <td>A1=45°, R1=3km, R2=500m</td>
+                            <td>FAI Sector</td>
+                            <td>CustomKeyhole</td>
+                            <td>DAe sector</td>
+                            <td class="compat-warn">⚠ Outer circle only</td>
+                        </tr>
+                        <tr>
+                            <td><strong>BGA Keyhole</strong></td>
+                            <td>A1=45°, R1=10km, R2=500m</td>
+                            <td>BGA Keyhole</td>
+                            <td>BgaKeyholeZone</td>
+                            <td>DAe sector</td>
+                            <td class="compat-warn">⚠ Outer circle only</td>
+                        </tr>
+                        <tr>
+                            <td><strong>BGA Fixed Course</strong></td>
+                            <td>A1=45°, R1=20km, R2=500m</td>
+                            <td>BGA Fixed Course</td>
+                            <td>BGAFixedCourse</td>
+                            <td>DAe sector</td>
+                            <td class="compat-warn">⚠ Outer circle only</td>
+                        </tr>
+                        <tr>
+                            <td><strong>BGA Enhanced Option</strong></td>
+                            <td>A1=90°, R1=10km, R2=500m</td>
+                            <td>BGA Enhanced</td>
+                            <td>BGAEnhancedOption</td>
+                            <td>DAe sector</td>
+                            <td class="compat-warn">⚠ Outer circle only</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Start Line</strong></td>
+                            <td>Line, A1=90°, R2=0</td>
+                            <td>Start Line</td>
+                            <td>LineSectorZone</td>
+                            <td>LINE</td>
+                            <td class="compat-warn">⚠ Circle (ignored)</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Finish Line</strong></td>
+                            <td>Line, A1=90°, R2=0</td>
+                            <td>Finish Line</td>
+                            <td>LineSectorZone</td>
+                            <td>LINE</td>
+                            <td class="compat-ok">✓ LINE (LK8000)</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p class="oz-info-note">⚠ XCTSK QR v2 supports sector angle (A1) and line flag only — inner radius (R2) is not transmitted. All apps use CUP file for full fidelity.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirm Modal -->
+    <div id="confirm-modal" class="modal">
+        <div class="modal-content confirm-modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-exclamation-triangle"></i> Confirm</h2>
+            </div>
+            <div class="confirm-modal-body">
+                <p id="confirm-modal-message"></p>
+                <div class="form-actions">
+                    <button id="confirm-modal-cancel" class="btn btn-secondary">Cancel</button>
+                    <button id="confirm-modal-ok" class="btn btn-danger">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay" style="display: none;">
+        <div class="loading-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>Loading...</p>
+        </div>
+    </div>
+
+    <!-- XCSoar Repository Modal -->
+    <div id="xcsoar-repo-modal" class="modal">
+        <div class="modal-content xcsoar-repo-dialog">
+            <div class="modal-header">
+                <h2><i class="fas fa-database"></i> XCSoar Repository</h2>
+                <button class="close-btn" id="xcsoar-repo-close">&times;</button>
+            </div>
+            <div class="xcsoar-repo-body">
+                <div class="xcsoar-repo-filters">
+                    <select id="xcsoar-repo-type">
+                        <option value="">All types</option>
+                        <option value="waypoint">Waypoints</option>
+                        <option value="airspace">Airspace</option>
+                    </select>
+                    <input type="text" id="xcsoar-repo-search" placeholder="Search by country or name…" autocomplete="off">
+                </div>
+                <div id="xcsoar-repo-status" class="xcsoar-repo-status" style="display:none;"></div>
+                <div id="xcsoar-repo-list" class="xcsoar-repo-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+    <script src="{{ url_for('static', filename='js/icon-mapping.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/task-planner.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

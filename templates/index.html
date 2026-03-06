@@ -25,6 +25,10 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Shoelace Web Components -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2/cdn/themes/light.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2/cdn/themes/dark.css" />
+    <script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2/cdn/shoelace-autoloader.js"></script>
 </head>
 <body{% if view_mode %} class="view-mode"{% endif %}>
     {% if view_mode %}
@@ -40,102 +44,120 @@
         window.VIEW_TOKEN = {{ view_token | tojson }};
     </script>
     <div class="container">
-        <div class="header-row">
-            <div class="header-spacer"></div>
-            <header>
+        <!-- Modern Header with integrated toolbar -->
+        <header class="modern-header">
+            <div class="header-brand">
                 <img src="{{ url_for('static', filename='images/logo.png') }}" alt="GlidePlan" class="site-logo">
-                <p>Plan, edit and share soaring tasks &amp; waypoint files</p>
-            </header>
-            <div class="coffee-banner">
-                <a href="https://www.buymeacoffee.com/emil.b" target="_blank" rel="noopener noreferrer">
-                    <img src="{{ url_for('static', filename='images/qr-buymeacoffee.png') }}" alt="Buy me a coffee QR code" class="coffee-qr">
-                    <span class="coffee-text">Like it? Buy me a coffee ☕</span>
-                </a>
+                <div class="header-text">
+                    <h1>GlidePlan</h1>
+                    <p>Soaring Task &amp; Waypoint Editor</p>
+                </div>
             </div>
+            <div class="header-toolbar">
+                <sl-icon-button name="moon" id="theme-toggle" label="Toggle theme"></sl-icon-button>
+                <sl-divider vertical></sl-divider>
+                <sl-tooltip placement="bottom-end" hoist>
+                    <div slot="content" style="text-align:center; padding:4px;">
+                        <img src="/static/images/qr-buymeacoffee.png" width="160" alt="Buy Me a Coffee QR" style="display:block; border-radius:6px;">
+                        <div style="margin-top:6px; font-size:0.75rem; opacity:0.8;">Scan to support ☕</div>
+                    </div>
+                    <a href="https://www.buymeacoffee.com/emil.b" target="_blank" rel="noopener noreferrer" class="header-support-btn">
+                        <sl-button variant="text" size="small">
+                            <sl-icon slot="prefix" name="cup-hot"></sl-icon> Like it? Buy me a coffee
+                        </sl-button>
+                    </a>
+                </sl-tooltip>
+            </div>
+        </header>
+
+        <!-- Status Bar with Live Updates -->
+        <div id="status-bar" class="status-bar modern-status">
+            <sl-badge variant="neutral" pill>
+                <i class="fas fa-circle-notch fa-spin" style="display:none" id="status-spinner"></i>
+                <span id="status-text">Ready</span>
+            </sl-badge>
+            <sl-badge variant="primary" pill id="waypoint-count-badge">
+                <i class="fas fa-map-marker-alt"></i> <span id="waypoint-count">0</span>
+            </sl-badge>
         </div>
 
-        <!-- Status Bar -->
-        <div id="status-bar" class="status-bar">
-            <span id="status-text">Ready - No waypoints loaded</span>
-            <span id="waypoint-count">0 waypoints</span>
-        </div>
-
-        <!-- Tab Navigation -->
-        <div class="tab-nav">
+        <!-- Tab Navigation + Content -->
+        <sl-tab-group id="main-tabs">
             {% if not view_mode %}
-            <button class="tab-btn active" data-tab="map">
-                <i class="fas fa-map"></i> Map View
-            </button>
-            <button class="tab-btn" data-tab="list">
-                <i class="fas fa-list"></i> List View
-            </button>
+            <sl-tab slot="nav" panel="map"><i class="fas fa-map"></i> Map View</sl-tab>
+            <sl-tab slot="nav" panel="list"><i class="fas fa-list"></i> List View</sl-tab>
             {% endif %}
-            <button class="tab-btn{% if view_mode %} active{% endif %}" data-tab="task">
-                <i class="fas fa-route"></i> Task Planner
-            </button>
-        </div>
+            <sl-tab slot="nav" panel="task"{% if view_mode %} active{% endif %}><i class="fas fa-route"></i> Task Planner</sl-tab>
 
-        <!-- Tab Content -->
-        <div class="tab-content">
-            <!-- Map View Tab -->
-            <div id="map-tab" class="tab-pane{% if not view_mode %} active{% endif %}">
-                <div class="map-controls">
+            <!-- Map View -->
+            <sl-tab-panel name="map">
+                <div class="map-toolbar">
                     {% if not view_mode %}
-                    <button id="new-btn" class="btn btn-primary">
-                        <i class="fas fa-file"></i> New
-                    </button>
-                    <label for="file-upload" class="btn btn-primary">
-                        <i class="fas fa-folder-open"></i> Open File
-                    </label>
-                    <input type="file" id="file-upload" accept=".cup,.csv" style="display: none;">
-                    <button id="save-cup-btn" class="btn btn-success" disabled>
-                        <i class="fas fa-save"></i> Save CUP
-                    </button>
-                    <span class="map-controls-divider"></span>
+                    <sl-button-group label="File Operations">
+                        <sl-button id="new-btn" variant="default">
+                            <i class="fas fa-file" slot="prefix"></i> New
+                        </sl-button>
+                        <sl-button id="open-file-btn" variant="default">
+                            <i class="fas fa-folder-open" slot="prefix"></i> Open File
+                        </sl-button>
+                        <input type="file" id="file-upload" accept=".cup,.csv" style="display: none;">
+                        <sl-button id="save-cup-btn" variant="success" disabled>
+                            <i class="fas fa-save" slot="prefix"></i> Save CUP
+                        </sl-button>
+                    </sl-button-group>
+                    <sl-divider vertical></sl-divider>
                     {% endif %}
-                    <button id="fit-bounds-btn" class="btn btn-secondary">
-                        <i class="fas fa-expand-arrows-alt"></i> Fit All
-                    </button>
-                    <button id="add-waypoint-map-btn" class="btn btn-primary">
-                        <i class="fas fa-map-pin"></i> Add Waypoint on Map
-                    </button>
-                    <button id="show-legend-btn" class="btn btn-secondary">
-                        <i class="fas fa-info-circle"></i> Legend
-                    </button>
-                    {% if not view_mode %}
-                    <button id="xcsoar-repo-map-btn" class="btn btn-secondary" title="Browse XCSoar waypoint repository">
-                        <i class="fas fa-database"></i> Repository
-                    </button>
-                    {% endif %}
+                    <sl-button-group label="Map Tools">
+                        <sl-tooltip content="Fit all waypoints in view">
+                            <sl-button id="fit-bounds-btn" variant="default">
+                                <i class="fas fa-expand-arrows-alt"></i>
+                            </sl-button>
+                        </sl-tooltip>
+                        <sl-button id="add-waypoint-map-btn" variant="primary">
+                            <i class="fas fa-map-pin" slot="prefix"></i> Add Waypoint
+                        </sl-button>
+                        <sl-tooltip content="Show waypoint icons legend">
+                            <sl-button id="show-legend-btn" variant="default">
+                                <i class="fas fa-info-circle"></i>
+                            </sl-button>
+                        </sl-tooltip>
+                        {% if not view_mode %}
+                        <sl-tooltip content="Browse XCSoar waypoint repository">
+                            <sl-button id="xcsoar-repo-map-btn" variant="default">
+                                <i class="fas fa-database"></i>
+                            </sl-button>
+                        </sl-tooltip>
+                        {% endif %}
+                    </sl-button-group>
                 </div>
                 <div id="map" class="map-container"></div>
-            </div>
+            </sl-tab-panel>
 
-            <!-- Task Planner Tab -->
-            <div id="task-tab" class="tab-pane{% if view_mode %} active{% endif %}">
+            <!-- Task Planner -->
+            <sl-tab-panel name="task">
                 <div class="task-planner">
                     <div class="task-sidebar">
-                        <h3><i class="fas fa-route"></i> Task Planner</h3>
-
-                        <!-- File buttons row -->
-                        <div class="sidebar-file-row">
-                            <button id="task-open-btn" class="btn btn-secondary btn-sm">
-                                <i class="fas fa-folder-open"></i> Task
-                            </button>
-                            <input type="file" id="task-file-input" accept=".cup" style="display:none">
-                            {% if not view_mode %}
-                            <button id="airspace-open-btn" class="btn btn-secondary btn-sm">
-                                <i class="fas fa-shield-alt"></i> Airspace
-                            </button>
-                            <input type="file" id="airspace-file-input" accept=".txt,.openair,.air" style="display:none">
-                            <button id="airspace-clear-btn" class="btn btn-sm btn-light" style="display:none" title="Remove airspace">
-                                <i class="fas fa-times"></i>
-                            </button>
-                            <button id="xcsoar-repo-btn" class="btn btn-secondary btn-sm" title="Browse XCSoar data repository">
-                                <i class="fas fa-database"></i> Repository
-                            </button>
-                            {% endif %}
-                        </div>
+                        <!-- Task Toolbar Card -->
+                        <sl-card class="task-toolbar-card">
+                            <div class="task-toolbar-actions">
+                                <sl-button id="task-open-btn" variant="default" size="small">
+                                    <i class="fas fa-folder-open" slot="prefix"></i> Load Task
+                                </sl-button>
+                                <input type="file" id="task-file-input" accept=".cup" style="display:none">
+                                {% if not view_mode %}
+                                <sl-button id="airspace-open-btn" variant="default" size="small">
+                                    <i class="fas fa-shield-alt" slot="prefix"></i> Airspace
+                                </sl-button>
+                                <input type="file" id="airspace-file-input" accept=".txt,.openair,.air" style="display:none">
+                                <sl-button id="airspace-clear-btn" size="small" style="display:none" title="Remove airspace">
+                                    <i class="fas fa-times"></i>
+                                </sl-button>
+                                <sl-button id="xcsoar-repo-btn" variant="default" size="small" title="Browse XCSoar data repository">
+                                    <i class="fas fa-database" slot="prefix"></i> Repository
+                                </sl-button>
+                                {% endif %}
+                            </div>
+                        </sl-card>
 
                         {% if not view_mode %}
                         <!-- Airspace filter (shown after file load) -->
@@ -155,117 +177,163 @@
                             </div>
                         </div>
 
-                        <!-- Wind inline row -->
-                        <div class="wind-inline">
-                            <span class="wind-inline-label"><i class="fas fa-wind"></i> Wind</span>
-                            <div class="wind-inline-fields">
-                                <div class="wind-inline-field">
-                                    <label for="task-wind-dir">&deg;</label>
-                                    <input type="number" id="task-wind-dir" min="0" max="360" value="0" placeholder="0">
-                                </div>
-                                <div class="wind-inline-field">
-                                    <label for="task-wind-speed">kt</label>
-                                    <input type="number" id="task-wind-speed" min="0" max="150" value="15" placeholder="15">
-                                </div>
-                                <div class="wind-inline-field">
-                                    <label for="task-tas">TAS&nbsp;km/h</label>
-                                    <input type="number" id="task-tas" min="0" max="400" value="100" placeholder="100">
-                                </div>
+                        <!-- Wind & Speed -->
+                        <sl-card class="wind-card">
+                            <div slot="header" class="card-header-collapsible">
+                                <span class="card-header-with-icon">
+                                    <i class="fas fa-wind"></i> Wind &amp; Speed
+                                </span>
+                                <sl-icon-button id="wind-card-toggle" name="chevron-down" label="Collapse"></sl-icon-button>
                             </div>
-                        </div>
+                            <div id="wind-card-body" class="wind-fields-grid">
+                                <sl-input type="number" id="task-wind-dir" label="Wind °" size="small" min="0" max="360" value="0" no-spin-buttons>
+                                    <i class="fas fa-compass" slot="prefix"></i>
+                                </sl-input>
+                                <sl-input type="number" id="task-wind-speed" label="Speed kt" size="small" min="0" max="150" value="0" no-spin-buttons>
+                                    <i class="fas fa-wind" slot="prefix"></i>
+                                </sl-input>
+                                <sl-input type="number" id="task-tas" label="TAS km/h" size="small" min="0" max="400" value="100" no-spin-buttons>
+                                    <i class="fas fa-plane" slot="prefix"></i>
+                                </sl-input>
+                            </div>
+                        </sl-card>
                         {% endif %}
 
-                        <!-- Task name + options in one compact block -->
-                        <div class="task-meta-block">
-                            <input type="text" id="task-name" class="task-name-input" value="Task 1" placeholder="Task name"{% if view_mode %} readonly{% endif %}>
-                            <details class="task-options-details"{% if view_mode %} open style="pointer-events:none;opacity:.7"{% endif %}>
-                                <summary><i class="fas fa-cog"></i> Options</summary>
-                                <div class="task-options-body">
-                                    <div class="task-options-row">
-                                        <label for="task-no-start">No start before (UTC)</label>
-                                        <input type="time" id="task-no-start" value="12:00"{% if view_mode %} readonly disabled{% endif %}>
-                                    </div>
-                                    <div class="task-options-row">
-                                        <label for="task-time">Task time</label>
-                                        <input type="text" id="task-time" value="03:00:00" placeholder="HH:MM:SS"{% if view_mode %} readonly disabled{% endif %}>
-                                    </div>
+                        <!-- Task Details Card -->
+                        <sl-card class="task-details-card">
+                            <div slot="header" class="card-header-with-icon">
+                                <i class="fas fa-tasks"></i> Task Details
+                            </div>
+                            <div class="task-name-row">
+                                <sl-input id="task-name" value="Task 1" placeholder="Task name" size="small"{% if view_mode %} readonly{% endif %}>
+                                    <i class="fas fa-tag" slot="prefix"></i>
+                                </sl-input>
+                                {% if not view_mode %}
+                                <sl-icon-button id="task-advanced-toggle" name="gear" label="Advanced options" title="Advanced options"></sl-icon-button>
+                                {% endif %}
+                            </div>
+                            {% if not view_mode %}
+                            <div id="task-advanced-panel" class="task-advanced-panel" style="display:none">
+                                <div class="task-option-field">
+                                    <label><i class="fas fa-clock"></i> No start before (UTC)</label>
+                                    <input type="time" id="task-no-start" class="native-time-input" value="12:00">
                                 </div>
-                            </details>
-                        </div>
+                                <div class="task-option-field">
+                                    <label><i class="fas fa-hourglass-half"></i> Task time</label>
+                                    <input type="text" id="task-time" class="native-time-input" value="03:00:00" placeholder="HH:MM:SS">
+                                </div>
+                            </div>
+                            {% else %}
+                            <div class="task-advanced-panel">
+                                <div class="task-option-field">
+                                    <label><i class="fas fa-clock"></i> No start before (UTC)</label>
+                                    <input type="time" id="task-no-start" class="native-time-input" value="12:00" readonly disabled>
+                                </div>
+                                <div class="task-option-field">
+                                    <label><i class="fas fa-hourglass-half"></i> Task time</label>
+                                    <input type="text" id="task-time" class="native-time-input" value="03:00:00" placeholder="HH:MM:SS" readonly disabled>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </sl-card>
 
-                        <!-- Search waypoints -->
-                        <div class="task-wp-search-wrap">
-                            <label class="task-wp-search-label">Add Waypoint</label>
+                        <!-- Waypoint Search Card -->
+                        <sl-card class="waypoint-search-card">
+                            <div slot="header" class="card-header-with-icon">
+                                <i class="fas fa-search-location"></i> Add Waypoints
+                            </div>
                             <div style="position:relative">
-                                <input type="text" id="task-wp-search" placeholder="Search waypoints..." autocomplete="off">
+                                <sl-input id="task-wp-search" placeholder="Search by name or code..." size="small" clearable>
+                                    <i class="fas fa-search" slot="prefix"></i>
+                                </sl-input>
                                 <div id="task-wp-results" class="task-wp-results"></div>
                             </div>
-                        </div>
+                        </sl-card>
 
                         <!-- Task points list -->
                         <div id="task-points-list" class="task-points-list">
                             <p class="task-empty-msg">No task points added. Search and add waypoints above.</p>
                         </div>
 
-                        <!-- Task summary -->
-                        <div id="task-summary" class="task-summary" style="display:none;">
-                            <div class="task-summary-row">
-                                <span>Total distance:</span>
-                                <strong id="task-total-distance">0 km</strong>
+                        <!-- Task Summary Card -->
+                        <sl-card id="task-summary" class="task-summary-card" style="display:none;">
+                            <div slot="header" class="card-header-with-icon">
+                                <i class="fas fa-chart-line"></i> Task Summary
                             </div>
-                            <div class="task-summary-row" id="task-total-time-row" style="display:none;">
-                                <span>Est. flight time:</span>
-                                <strong id="task-total-time">&mdash;</strong>
-                            </div>
-                            <div class="task-summary-row">
-                                <span>Legs:</span>
-                                <strong id="task-leg-count">0</strong>
-                            </div>
-                        </div>
-
-                        <!-- Export buttons -->
-                        <div class="task-export-actions">
-                            <div class="dropdown" id="task-download-dropdown">
-                                <button id="task-download-btn" class="btn btn-success dropdown-toggle" disabled
-                                        aria-haspopup="true" aria-expanded="false">
-                                    <i class="fas fa-download"></i> Download
-                                </button>
-                                <div class="dropdown-menu" id="task-download-menu">
-                                    <a class="dropdown-item" href="#" onclick="window.taskPlanner.downloadTask('cup'); return false;">SeeYou CUP (.cup)</a>
-                                    <a class="dropdown-item" href="#" onclick="window.taskPlanner.downloadTask('tsk'); return false;">XCSoar TSK (.tsk)</a>
-                                    <a class="dropdown-item" href="#" onclick="window.taskPlanner.downloadTask('lkt'); return false;">LK8000 LKT (.lkt)</a>
-                                    <a class="dropdown-item" href="#" onclick="window.taskPlanner.downloadTask('xctsk'); return false;">XCTrack XCTSK (.xctsk)</a>
+                            <div class="task-summary-stats">
+                                <div class="task-stat">
+                                    <i class="fas fa-route"></i>
+                                    <div>
+                                        <label>Distance</label>
+                                        <strong id="task-total-distance">0 km</strong>
+                                    </div>
+                                </div>
+                                <div class="task-stat" id="task-total-time-row" style="display:none;">
+                                    <i class="fas fa-clock"></i>
+                                    <div>
+                                        <label>Flight Time</label>
+                                        <strong id="task-total-time">—</strong>
+                                    </div>
                                 </div>
                             </div>
-                            <button id="task-qr-btn" class="btn btn-primary" disabled>
-                                <i class="fas fa-qrcode"></i> XCTSK QR
-                            </button>
-                            <button id="task-share-btn" class="btn btn-share" disabled>
-                                <i class="fas fa-share-alt"></i> Share
-                            </button>
-                            <button id="task-clear-btn" class="btn btn-danger">
-                                <i class="fas fa-trash"></i> Clear Task
-                            </button>
-                        </div>
+                        </sl-card>
+
+                        <!-- Export Actions Card -->
+                        <sl-card class="export-actions-card">
+                            <div slot="header" class="card-header-with-icon">
+                                <i class="fas fa-download"></i> Export Task
+                            </div>
+                            <div class="export-actions-grid">
+                                <sl-dropdown id="task-download-dropdown" placement="bottom-start" style="width:100%">
+                                    <sl-button slot="trigger" id="task-download-btn" variant="success" disabled caret style="width:100%">
+                                        <i class="fas fa-download" slot="prefix"></i> Download
+                                    </sl-button>
+                                    <sl-menu id="task-download-menu">
+                                        <sl-menu-item value="cup">
+                                            <i class="fas fa-file-alt" slot="prefix"></i> SeeYou CUP (.cup)
+                                        </sl-menu-item>
+                                        <sl-menu-item value="tsk">
+                                            <i class="fas fa-file-code" slot="prefix"></i> XCSoar TSK (.tsk)
+                                        </sl-menu-item>
+                                        <sl-menu-item value="lkt">
+                                            <i class="fas fa-file" slot="prefix"></i> LK8000 LKT (.lkt)
+                                        </sl-menu-item>
+                                        <sl-menu-item value="xctsk">
+                                            <i class="fas fa-mobile-alt" slot="prefix"></i> XCTrack XCTSK (.xctsk)
+                                        </sl-menu-item>
+                                    </sl-menu>
+                                </sl-dropdown>
+                                <sl-button id="task-qr-btn" variant="primary" disabled style="width:100%">
+                                    <i class="fas fa-qrcode" slot="prefix"></i> XCTSK QR
+                                </sl-button>
+                                <sl-button id="task-share-btn" variant="primary" class="share-btn" disabled style="width:100%">
+                                    <i class="fas fa-share-alt" slot="prefix"></i> Share Link
+                                </sl-button>
+                                <sl-button id="task-clear-btn" variant="danger" style="width:100%">
+                                    <i class="fas fa-trash" slot="prefix"></i> Clear Task
+                                </sl-button>
+                            </div>
+                        </sl-card>
                     </div>
                     <div class="task-map-area">
                         <div id="task-map" class="map-container"></div>
                     </div>
                 </div>
-            </div>
+            </sl-tab-panel>
 
-            <!-- List View Tab -->
-            <div id="list-tab" class="tab-pane">
+            <!-- List View -->
+            <sl-tab-panel name="list">
+                {% if not view_mode %}
                 <div class="waypoint-actions">
-                    <button id="add-waypoint-btn" class="btn btn-primary">
-                        <i class="fas fa-plus"></i> Add Waypoint
-                    </button>
-                    <button id="edit-waypoint-btn" class="btn btn-secondary" disabled>
-                        <i class="fas fa-edit"></i> Edit Selected
-                    </button>
-                    <button id="delete-waypoint-btn" class="btn btn-danger" disabled>
-                        <i class="fas fa-trash"></i> Delete Selected
-                    </button>
+                    <sl-button id="add-waypoint-btn" variant="primary">
+                        <i class="fas fa-plus" slot="prefix"></i> Add Waypoint
+                    </sl-button>
+                    <sl-button id="edit-waypoint-btn" variant="neutral" disabled>
+                        <i class="fas fa-edit" slot="prefix"></i> Edit Selected
+                    </sl-button>
+                    <sl-button id="delete-waypoint-btn" variant="danger" disabled>
+                        <i class="fas fa-trash" slot="prefix"></i> Delete Selected
+                    </sl-button>
                 </div>
                 <div class="table-container">
                     <table id="waypoints-table" class="waypoints-table">
@@ -284,48 +352,47 @@
                             </tr>
                         </thead>
                         <tbody id="waypoints-tbody">
-                            <!-- Waypoints will be populated here -->
                         </tbody>
                     </table>
                 </div>
-            </div>
-        </div>
+                {% endif %}
+            </sl-tab-panel>
+        </sl-tab-group>
     </div>
 
-    <footer class="site-footer">
-        <div class="site-footer-inner">
-            <span>GlidePlan &mdash; free tool for glider pilots</span>
-            <span class="footer-sep">&middot;</span>
-            <a href="https://www.buymeacoffee.com/emil.b" target="_blank" rel="noopener noreferrer">
-                <i class="fas fa-coffee"></i> Support this project
-            </a>
+    <!-- Modern Footer -->
+    <footer class="site-footer modern-footer">
+        <div class="footer-content">
+            <div class="footer-brand">
+                <strong>GlidePlan</strong> &mdash; Free tool for glider pilots
+            </div>
+            <div class="footer-links">
+                <a href="https://www.buymeacoffee.com/emil.b" target="_blank" rel="noopener noreferrer">
+                    <sl-icon name="cup-hot"></sl-icon> Support this project
+                </a>
+                <span class="footer-sep">&middot;</span>
+                <a href="https://github.com" target="_blank" rel="noopener noreferrer">
+                    <sl-icon name="github"></sl-icon> GitHub
+                </a>
+            </div>
         </div>
     </footer>
 
-    <!-- Waypoint Edit Modal -->
-    <div id="waypoint-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 id="modal-title">Add Waypoint</h2>
-                <button class="close-btn" id="modal-close">&times;</button>
-            </div>
-            
-            <!-- Tab Navigation for Modal -->
-            <div class="modal-tab-nav">
-                <button type="button" class="modal-tab-btn active" data-modal-tab="basic">
+    <!-- Waypoint Edit Dialog -->
+    <sl-dialog id="waypoint-modal" label="Add Waypoint" style="--width: 700px;">
+        <form id="waypoint-form" class="waypoint-form">
+            <sl-tab-group id="modal-tabs">
+                <sl-tab slot="nav" panel="basic">
                     <i class="fas fa-info-circle"></i> Basic Info
-                </button>
-                <button type="button" class="modal-tab-btn" data-modal-tab="airfield">
+                </sl-tab>
+                <sl-tab slot="nav" panel="airfield">
                     <i class="fas fa-plane"></i> Airfield Info
-                </button>
-                <button type="button" class="modal-tab-btn" data-modal-tab="details">
+                </sl-tab>
+                <sl-tab slot="nav" panel="details">
                     <i class="fas fa-file-text"></i> Details
-                </button>
-            </div>
-            
-            <form id="waypoint-form" class="waypoint-form">
-                <!-- Basic Info Tab -->
-                <div id="modal-basic-tab" class="modal-tab-pane active">
+                </sl-tab>
+
+                <sl-tab-panel name="basic">
                     <h3>Basic Information</h3>
                     <div class="form-row">
                         <div class="form-group">
@@ -342,13 +409,13 @@
                         </div>
                         <div class="form-group">
                             <label>&nbsp;</label>
-                            <button type="button" id="paste-coords-btn" class="btn btn-secondary">
-                                <i class="fas fa-clipboard"></i> Paste Coords
-                            </button>
+                            <sl-button id="paste-coords-btn" variant="neutral" size="small">
+                                <i class="fas fa-clipboard" slot="prefix"></i> Paste Coords
+                            </sl-button>
                             <small>Paste: lat, lon from clipboard</small>
                         </div>
                     </div>
-                    
+
                     <div class="form-row">
                         <div class="form-group">
                             <label for="wp-latitude">Latitude *</label>
@@ -361,7 +428,7 @@
                             <small>Decimal degrees, positive = East</small>
                         </div>
                     </div>
-                    
+
                     <div class="form-row">
                         <div class="form-group">
                             <label for="wp-elevation-value">Elevation</label>
@@ -371,9 +438,9 @@
                                     <option value="m">m</option>
                                     <option value="ft">ft</option>
                                 </select>
-                                <button type="button" id="fetch-elevation-btn" class="btn btn-sm">
-                                    <i class="fas fa-download"></i> Fetch
-                                </button>
+                                <sl-button id="fetch-elevation-btn" size="small">
+                                    <i class="fas fa-download" slot="prefix"></i> Fetch
+                                </sl-button>
                             </div>
                             <small>Leave empty to auto-fetch</small>
                         </div>
@@ -386,11 +453,10 @@
                             </select>
                         </div>
                     </div>
-                </div>
-                
-                <!-- Airfield Info Tab -->
-                <div id="modal-airfield-tab" class="modal-tab-pane">
-                    <h3>Airfield & Runway Information</h3>
+                </sl-tab-panel>
+
+                <sl-tab-panel name="airfield">
+                    <h3>Airfield &amp; Runway Information</h3>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="wp-runway-direction">Runway Direction</label>
@@ -403,7 +469,7 @@
                             <small>MHz (100-150 typical aviation range)</small>
                         </div>
                     </div>
-                    
+
                     <div class="form-row">
                         <div class="form-group">
                             <label for="wp-runway-length-value">Runway Length</label>
@@ -430,154 +496,125 @@
                             <small>m=meters, nm=nautical miles, ml=statute miles</small>
                         </div>
                     </div>
-                </div>
-                
-                <!-- Details Tab -->
-                <div id="modal-details-tab" class="modal-tab-pane">
+                </sl-tab-panel>
+
+                <sl-tab-panel name="details">
                     <h3>Additional Information</h3>
                     <div class="form-group">
                         <label for="wp-description">Description</label>
                         <textarea id="wp-description" name="description" rows="10" placeholder="Free text description or notes"></textarea>
                         <small>Free text description or notes</small>
                     </div>
-                </div>
-                
-                <div class="form-actions">
-                    <button type="button" id="cancel-btn" class="btn btn-secondary">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save Waypoint</button>
-                </div>
-            </form>
-        </div>
-    </div>
+                </sl-tab-panel>
+            </sl-tab-group>
 
-    <!-- Legend Modal -->
-    <div id="legend-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>Waypoint Icon Legend</h2>
-                <button class="close-btn" id="legend-close">&times;</button>
+            <div class="form-actions">
+                <sl-button variant="neutral" id="cancel-btn">Cancel</sl-button>
+                <sl-button variant="primary" type="submit">Save Waypoint</sl-button>
             </div>
-            <div class="legend-content">
-                <p>Different waypoint types are displayed with specific icons from XCSoar:</p>
-                <div id="legend-items"></div>
-            </div>
-        </div>
-    </div>
+        </form>
+    </sl-dialog>
 
-    <!-- Task QR Modal -->
-    <div id="task-qr-modal" class="modal">
-        <div class="modal-content" style="max-width:480px;">
-            <div class="modal-header">
-                <h2>Task QR Code (XCTSK)</h2>
-                <button class="close-btn" id="task-qr-close">&times;</button>
-            </div>
-            <div class="task-qr-body">
-                <p>Scan with <strong>XCTrack</strong>, <strong>XCSoar</strong>, <strong>LK8000</strong>, or <strong>SeeYou Navigator</strong> to load the task directly.</p>
-                <div id="task-qr-canvas" class="task-qr-canvas"></div>
-                <div class="task-qr-actions">
-                    <button id="task-qr-download-img" class="btn btn-secondary">
-                        <i class="fas fa-image"></i> Save QR Image
-                    </button>
-                    <button id="task-qr-download-cup" class="btn btn-success">
-                        <i class="fas fa-download"></i> Download CUP
-                    </button>
-                </div>
-            </div>
+    <!-- Legend Dialog -->
+    <sl-dialog id="legend-modal" label="Waypoint Icon Legend">
+        <div class="legend-content">
+            <p>Different waypoint types are displayed with specific icons from XCSoar:</p>
+            <div id="legend-items"></div>
         </div>
-    </div>
+    </sl-dialog>
 
-    <!-- Share Modal -->
-    <div id="share-modal" class="modal">
-        <div class="modal-content" style="max-width:460px;">
-            <div class="modal-header">
-                <h2><i class="fas fa-share-alt"></i> Share Task Link</h2>
-                <button class="close-btn" id="share-modal-close">&times;</button>
-            </div>
-            <div style="padding:24px;">
-                <p style="margin-bottom:16px; color:var(--text-secondary); font-size:14px; line-height:1.5;">
-                    <i class="fas fa-clock"></i>&nbsp; This link expires in <strong>24 hours</strong>.
-                    Anyone with it can view the QR code and download the task file.
-                </p>
-                <div class="input-group" style="margin-bottom:16px;">
-                    <input type="text" id="share-url-input" readonly
-                           style="font-size:13px; background:var(--background);">
-                    <button id="share-copy-btn" class="btn btn-primary" style="white-space:nowrap;">
-                        <i class="fas fa-copy"></i> Copy
-                    </button>
-                </div>
-                <div style="text-align:center;">
-                    <a id="share-open-link" href="#" target="_blank" rel="noopener" class="btn btn-secondary">
-                        <i class="fas fa-external-link-alt"></i> Open Link
-                    </a>
-                </div>
+    <!-- Task QR Dialog -->
+    <sl-dialog id="task-qr-modal" label="Task QR Code (XCTSK)" style="--width: 480px;">
+        <div class="task-qr-body">
+            <p>Scan with <strong>XCTrack</strong>, <strong>XCSoar</strong>, <strong>LK8000</strong>, or <strong>SeeYou Navigator</strong> to load the task directly.</p>
+            <div id="task-qr-canvas" class="task-qr-canvas"></div>
+            <div class="task-qr-actions">
+                <sl-button id="task-qr-download-img" variant="neutral">
+                    <i class="fas fa-image" slot="prefix"></i> Save QR Image
+                </sl-button>
+                <sl-button id="task-qr-download-cup" variant="success">
+                    <i class="fas fa-download" slot="prefix"></i> Download CUP
+                </sl-button>
             </div>
         </div>
-    </div>
+    </sl-dialog>
 
-    <!-- Task Point Edit Modal -->
-    <div id="task-point-modal" class="modal">
-        <div class="modal-content" style="max-width:500px;">
-            <div class="modal-header">
-                <h2 id="task-point-modal-title">Edit Observation Zone</h2>
-                <button class="close-btn" id="task-point-modal-close">&times;</button>
+    <!-- Share Dialog -->
+    <sl-dialog id="share-modal" label="Share Task Link" style="--width: 460px;">
+        <p style="margin-bottom:16px; color:var(--text-secondary); font-size:14px; line-height:1.5;">
+            <i class="fas fa-clock"></i>&nbsp; This link expires in <strong>24 hours</strong>.
+            Anyone with it can view the QR code and download the task file.
+        </p>
+        <div class="input-group" style="margin-bottom:16px;">
+            <input type="text" id="share-url-input" readonly
+                   style="font-size:13px; background:var(--background); padding:10px 12px; border:1px solid var(--border); border-radius:6px; flex:1;">
+            <sl-button id="share-copy-btn" variant="primary">
+                <i class="fas fa-copy" slot="prefix"></i> Copy
+            </sl-button>
+        </div>
+        <div style="text-align:center;">
+            <sl-button id="share-open-link" variant="neutral" href="#" target="_blank">
+                <i class="fas fa-external-link-alt" slot="prefix"></i> Open Link
+            </sl-button>
+        </div>
+    </sl-dialog>
+
+    <!-- Task Point Edit Dialog -->
+    <sl-dialog id="task-point-modal" label="Edit Observation Zone" style="--width: 500px;">
+        <div class="form-group">
+            <label for="oz-preset">Zone Preset <button type="button" id="oz-info-btn" class="oz-info-btn" title="Observation zone app compatibility"><i class="fas fa-info-circle"></i></button></label>
+            <select id="oz-preset">
+                <option value="cylinder">Cylinder</option>
+                <option value="fai-sector">FAI Sector (45&deg; / 3km + 500m inner)</option>
+                <option value="keyhole">BGA Keyhole (45&deg; / 10km + 500m inner)</option>
+                <option value="bga-fixed-course">BGA Fixed Course (45&deg; / 20km + 500m inner)</option>
+                <option value="bga-enhanced">BGA Enhanced Option (90&deg; / 10km + 500m inner)</option>
+                <option value="start-line">Start Line</option>
+                <option value="finish-line">Finish Line</option>
+                <option value="custom">Custom</option>
+            </select>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="oz-r1">Radius R1 (m)</label>
+                <input type="number" id="oz-r1" value="500" min="0" step="100">
             </div>
-            <div style="padding:25px;">
-                <div class="form-group">
-                    <label for="oz-preset">Zone Preset <button type="button" id="oz-info-btn" class="oz-info-btn" title="Observation zone app compatibility"><i class="fas fa-info-circle"></i></button></label>
-                    <select id="oz-preset">
-                        <option value="cylinder">Cylinder</option>
-                        <option value="fai-sector">FAI Sector (45° / 3km + 500m inner)</option>
-                        <option value="keyhole">BGA Keyhole (45° / 10km + 500m inner)</option>
-                        <option value="bga-fixed-course">BGA Fixed Course (45° / 20km + 500m inner)</option>
-                        <option value="bga-enhanced">BGA Enhanced Option (90° / 10km + 500m inner)</option>
-                        <option value="start-line">Start Line</option>
-                        <option value="finish-line">Finish Line</option>
-                        <option value="custom">Custom</option>
-                    </select>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="oz-r1">Radius R1 (m)</label>
-                        <input type="number" id="oz-r1" value="500" min="0" step="100">
-                    </div>
-                    <div class="form-group">
-                        <label for="oz-a1">Angle A1 (°)</label>
-                        <input type="number" id="oz-a1" value="180" min="0" max="180" step="1">
-                        <small>180° = full cylinder, 90° = line, 45° = FAI sector</small>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="oz-r2">Inner Radius R2 (m)</label>
-                        <input type="number" id="oz-r2" value="0" min="0" step="100">
-                    </div>
-                    <div class="form-group">
-                        <label for="oz-a2">Inner Angle A2 (°)</label>
-                        <input type="number" id="oz-a2" value="180" min="0" max="180" step="1">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="oz-direction-mode">Sector Direction</label>
-                        <select id="oz-direction-mode">
-                            <option value="auto">Auto (from task legs)</option>
-                            <option value="fixed">Fixed bearing</option>
-                        </select>
-                        <small>Auto computes direction from adjacent legs</small>
-                    </div>
-                    <div class="form-group">
-                        <label for="oz-bearing">Bearing (°)</label>
-                        <input type="number" id="oz-bearing" value="0" min="0" max="360" step="1" disabled>
-                        <small>0° = North, 90° = East, etc.</small>
-                    </div>
-                </div>
-                <div class="form-actions">
-                    <button type="button" id="oz-cancel-btn" class="btn btn-secondary">Cancel</button>
-                    <button type="button" id="oz-save-btn" class="btn btn-primary">Save</button>
-                </div>
+            <div class="form-group">
+                <label for="oz-a1">Angle A1 (&deg;)</label>
+                <input type="number" id="oz-a1" value="180" min="0" max="180" step="1">
+                <small>180&deg; = full cylinder, 90&deg; = line, 45&deg; = FAI sector</small>
             </div>
         </div>
-    </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="oz-r2">Inner Radius R2 (m)</label>
+                <input type="number" id="oz-r2" value="0" min="0" step="100">
+            </div>
+            <div class="form-group">
+                <label for="oz-a2">Inner Angle A2 (&deg;)</label>
+                <input type="number" id="oz-a2" value="180" min="0" max="180" step="1">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="oz-direction-mode">Sector Direction</label>
+                <select id="oz-direction-mode">
+                    <option value="auto">Auto (from task legs)</option>
+                    <option value="fixed">Fixed bearing</option>
+                </select>
+                <small>Auto computes direction from adjacent legs</small>
+            </div>
+            <div class="form-group">
+                <label for="oz-bearing">Bearing (&deg;)</label>
+                <input type="number" id="oz-bearing" value="0" min="0" max="360" step="1" disabled>
+                <small>0&deg; = North, 90&deg; = East, etc.</small>
+            </div>
+        </div>
+        <div class="form-actions">
+            <sl-button variant="neutral" id="oz-cancel-btn">Cancel</sl-button>
+            <sl-button variant="primary" id="oz-save-btn">Save</sl-button>
+        </div>
+    </sl-dialog>
 
     <!-- OZ Info Popup -->
     <div id="oz-info-popup" class="oz-info-popup" style="display:none;">
@@ -602,82 +639,73 @@
                     <tbody>
                         <tr>
                             <td><strong>Cylinder</strong></td>
-                            <td>A1=180°, R2=0</td>
+                            <td>A1=180&deg;, R2=0</td>
                             <td>Cylinder</td>
                             <td>CylinderZone</td>
                             <td>CIRCLE</td>
-                            <td class="compat-ok">✓ Full</td>
+                            <td class="compat-ok">&#10003; Full</td>
                         </tr>
                         <tr>
                             <td><strong>FAI Sector</strong></td>
-                            <td>A1=45°, R1=3km, R2=500m</td>
+                            <td>A1=45&deg;, R1=3km, R2=500m</td>
                             <td>FAI Sector</td>
                             <td>CustomKeyhole</td>
                             <td>DAe sector</td>
-                            <td class="compat-warn">⚠ Outer circle only</td>
+                            <td class="compat-warn">&#9888; Outer circle only</td>
                         </tr>
                         <tr>
                             <td><strong>BGA Keyhole</strong></td>
-                            <td>A1=45°, R1=10km, R2=500m</td>
+                            <td>A1=45&deg;, R1=10km, R2=500m</td>
                             <td>BGA Keyhole</td>
                             <td>BgaKeyholeZone</td>
                             <td>DAe sector</td>
-                            <td class="compat-warn">⚠ Outer circle only</td>
+                            <td class="compat-warn">&#9888; Outer circle only</td>
                         </tr>
                         <tr>
                             <td><strong>BGA Fixed Course</strong></td>
-                            <td>A1=45°, R1=20km, R2=500m</td>
+                            <td>A1=45&deg;, R1=20km, R2=500m</td>
                             <td>BGA Fixed Course</td>
                             <td>BGAFixedCourse</td>
                             <td>DAe sector</td>
-                            <td class="compat-warn">⚠ Outer circle only</td>
+                            <td class="compat-warn">&#9888; Outer circle only</td>
                         </tr>
                         <tr>
                             <td><strong>BGA Enhanced Option</strong></td>
-                            <td>A1=90°, R1=10km, R2=500m</td>
+                            <td>A1=90&deg;, R1=10km, R2=500m</td>
                             <td>BGA Enhanced</td>
                             <td>BGAEnhancedOption</td>
                             <td>DAe sector</td>
-                            <td class="compat-warn">⚠ Outer circle only</td>
+                            <td class="compat-warn">&#9888; Outer circle only</td>
                         </tr>
                         <tr>
                             <td><strong>Start Line</strong></td>
-                            <td>Line, A1=90°, R2=0</td>
+                            <td>Line, A1=90&deg;, R2=0</td>
                             <td>Start Line</td>
                             <td>LineSectorZone</td>
                             <td>LINE</td>
-                            <td class="compat-warn">⚠ Circle (ignored)</td>
+                            <td class="compat-warn">&#9888; Circle (ignored)</td>
                         </tr>
                         <tr>
                             <td><strong>Finish Line</strong></td>
-                            <td>Line, A1=90°, R2=0</td>
+                            <td>Line, A1=90&deg;, R2=0</td>
                             <td>Finish Line</td>
                             <td>LineSectorZone</td>
                             <td>LINE</td>
-                            <td class="compat-ok">✓ LINE (LK8000)</td>
+                            <td class="compat-ok">&#10003; LINE (LK8000)</td>
                         </tr>
                     </tbody>
                 </table>
-                <p class="oz-info-note">⚠ XCTSK QR v2 supports sector angle (A1) and line flag only — inner radius (R2) is not transmitted. All apps use CUP file for full fidelity.</p>
+                <p class="oz-info-note">&#9888; XCTSK QR v2 supports sector angle (A1) and line flag only &mdash; inner radius (R2) is not transmitted. All apps use CUP file for full fidelity.</p>
             </div>
         </div>
     </div>
 
-    <!-- Confirm Modal -->
-    <div id="confirm-modal" class="modal">
-        <div class="modal-content confirm-modal-content">
-            <div class="modal-header">
-                <h2><i class="fas fa-exclamation-triangle"></i> Confirm</h2>
-            </div>
-            <div class="confirm-modal-body">
-                <p id="confirm-modal-message"></p>
-                <div class="form-actions">
-                    <button id="confirm-modal-cancel" class="btn btn-secondary">Cancel</button>
-                    <button id="confirm-modal-ok" class="btn btn-danger">OK</button>
-                </div>
-            </div>
-        </div>
-    </div>
+    <!-- Confirm Dialog -->
+    <sl-dialog id="confirm-modal" label="Confirm" style="--width: 420px;">
+        <p id="confirm-modal-message"></p>
+        <sl-button slot="footer" variant="neutral" id="confirm-modal-cancel">Cancel</sl-button>
+        <sl-button slot="footer" variant="danger" id="confirm-modal-ok">OK</sl-button>
+    </sl-dialog>
 
     <!-- Loading Overlay -->
     <div id="loading-overlay" class="loading-overlay" style="display: none;">
@@ -687,27 +715,21 @@
         </div>
     </div>
 
-    <!-- XCSoar Repository Modal -->
-    <div id="xcsoar-repo-modal" class="modal">
-        <div class="modal-content xcsoar-repo-dialog">
-            <div class="modal-header">
-                <h2><i class="fas fa-database"></i> XCSoar Repository</h2>
-                <button class="close-btn" id="xcsoar-repo-close">&times;</button>
+    <!-- XCSoar Repository Dialog -->
+    <sl-dialog id="xcsoar-repo-modal" label="XCSoar Repository" style="--width: 640px;">
+        <div class="xcsoar-repo-body">
+            <div class="xcsoar-repo-filters">
+                <select id="xcsoar-repo-type">
+                    <option value="">All types</option>
+                    <option value="waypoint">Waypoints</option>
+                    <option value="airspace">Airspace</option>
+                </select>
+                <input type="text" id="xcsoar-repo-search" placeholder="Search by country or name&hellip;" autocomplete="off">
             </div>
-            <div class="xcsoar-repo-body">
-                <div class="xcsoar-repo-filters">
-                    <select id="xcsoar-repo-type">
-                        <option value="">All types</option>
-                        <option value="waypoint">Waypoints</option>
-                        <option value="airspace">Airspace</option>
-                    </select>
-                    <input type="text" id="xcsoar-repo-search" placeholder="Search by country or name…" autocomplete="off">
-                </div>
-                <div id="xcsoar-repo-status" class="xcsoar-repo-status" style="display:none;"></div>
-                <div id="xcsoar-repo-list" class="xcsoar-repo-list"></div>
-            </div>
+            <div id="xcsoar-repo-status" class="xcsoar-repo-status" style="display:none;"></div>
+            <div id="xcsoar-repo-list" class="xcsoar-repo-list"></div>
         </div>
-    </div>
+    </sl-dialog>
 
     <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

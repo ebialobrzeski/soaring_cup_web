@@ -23,8 +23,11 @@ class SoaringCupEditor {
 
     initializeApp() {
         this.setupEventListeners();
+        this.setupThemeToggle();
         this.initializeMap();
-        this.loadWaypoints();
+        if (!window.VIEW_MODE) {
+            this.loadWaypoints(); // Not needed in view mode — task data comes from share token
+        }
         this.updateUI();
         
         // Since map tab is now default, ensure map renders properly
@@ -40,11 +43,16 @@ class SoaringCupEditor {
             window.taskPlanner.setup();
         }
 
-        // View mode: auto-switch to task tab and make task name read-only
+        // View mode: task tab is already active via the `active` attribute in HTML
+        // — do NOT call switchTab('task') as it causes Shoelace to briefly hide/re-show
+        //   the panel, which makes Leaflet lose its container dimensions (blank map).
         if (window.VIEW_MODE) {
-            this.switchTab('task');
             const nameInput = document.getElementById('task-name');
             if (nameInput) nameInput.readOnly = true;
+            // Init task map after Shoelace has fully upgraded the tab group
+            setTimeout(() => {
+                if (window.taskPlanner) window.taskPlanner.initMap();
+            }, 500);
         }
     }
 
@@ -52,25 +60,26 @@ class SoaringCupEditor {
         // File operations (not present in view mode)
         if (!window.VIEW_MODE) {
             document.getElementById('file-upload').addEventListener('change', (e) => this.handleFileUpload(e));
+            document.getElementById('open-file-btn').addEventListener('click', () => document.getElementById('file-upload').click());
             document.getElementById('new-btn').addEventListener('click', () => this.newFile());
             document.getElementById('save-cup-btn').addEventListener('click', () => this.downloadFile('cup'));
         }
 
-        // Tab navigation
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.addEventListener('click', () => this.switchTab(btn.dataset.tab));
+        // Tab navigation (Shoelace tab group)
+        document.getElementById('main-tabs').addEventListener('sl-tab-show', (e) => {
+            const panel = e.detail.name;
+            if (panel === 'map') {
+                setTimeout(() => this.map.invalidateSize(), 100);
+            }
+            if (panel === 'task' && window.taskPlanner) {
+                setTimeout(() => window.taskPlanner.initMap(), 100);
+            }
         });
 
         // Map controls (present in both modes)
         document.getElementById('fit-bounds-btn').addEventListener('click', () => this.fitMapBounds());
         document.getElementById('add-waypoint-map-btn').addEventListener('click', () => this.addWaypointOnMap());
         document.getElementById('show-legend-btn').addEventListener('click', () => this.showLegendModal());
-
-        // Legend modal (present in both modes)
-        document.getElementById('legend-close').addEventListener('click', () => this.hideLegendModal());
-        document.getElementById('legend-modal').addEventListener('click', (e) => {
-            if (e.target.id === 'legend-modal') this.hideLegendModal();
-        });
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => this.handleKeyboardShortcuts(e));
@@ -89,21 +98,28 @@ class SoaringCupEditor {
                 th.addEventListener('click', () => this.sortTable(th.dataset.sort));
             });
 
-            // Modal tab navigation
-            document.querySelectorAll('.modal-tab-btn').forEach(btn => {
-                btn.addEventListener('click', () => this.switchModalTab(btn.dataset.modalTab));
-            });
-
-            // Waypoint modal
-            document.getElementById('modal-close').addEventListener('click', () => this.hideWaypointModal());
+            // Waypoint modal (sl-dialog)
             document.getElementById('cancel-btn').addEventListener('click', () => this.hideWaypointModal());
             document.getElementById('waypoint-form').addEventListener('submit', (e) => this.handleWaypointSubmit(e));
             document.getElementById('fetch-elevation-btn').addEventListener('click', () => this.fetchElevation());
             document.getElementById('paste-coords-btn').addEventListener('click', () => this.pasteCoordinates());
-            document.getElementById('waypoint-modal').addEventListener('click', (e) => {
-                if (e.target.id === 'waypoint-modal') this.hideWaypointModal();
-            });
         }
+    }
+
+    setupThemeToggle() {
+        const toggle = document.getElementById('theme-toggle');
+        const saved = localStorage.getItem('glideplan-theme');
+        // Default to dark mode unless user has explicitly chosen light
+        const preferDark = saved !== 'light';
+        if (preferDark) {
+            document.documentElement.classList.add('sl-theme-dark');
+            toggle.name = 'sun';
+        }
+        toggle.addEventListener('click', () => {
+            const isDark = document.documentElement.classList.toggle('sl-theme-dark');
+            toggle.name = isDark ? 'sun' : 'moon';
+            localStorage.setItem('glideplan-theme', isDark ? 'dark' : 'light');
+        });
     }
 
     setupResizeHandler() {
@@ -161,7 +177,7 @@ class SoaringCupEditor {
             if (this.map.getContainer().classList.contains('adding-waypoint')) {
                 this.addWaypointAtLocation(e.latlng.lat, e.latlng.lng);
                 this.map.getContainer().classList.remove('adding-waypoint');
-                document.getElementById('add-waypoint-map-btn').textContent = '📍 Add Waypoint on Map';
+                document.getElementById('add-waypoint-map-btn').innerHTML = '<i class="fas fa-map-pin" slot="prefix"></i> Add Waypoint on Map';
             }
         });
     }
@@ -171,7 +187,7 @@ class SoaringCupEditor {
             const response = await fetch('/api/waypoints');
             if (response.ok) {
                 this.waypoints = await response.json();
-                this.updateUI();
+                this.updateUI(true); // Fit bounds on initial load
             }
         } catch (error) {
             this.showStatus('Error loading waypoints: ' + error.message, 'error');
@@ -197,7 +213,7 @@ class SoaringCupEditor {
             
             if (result.success) {
                 this.waypoints = result.waypoints;
-                this.updateUI();
+                this.updateUI(true); // Fit bounds after file upload
                 this.showStatus(result.message, 'success');
             } else {
                 this.showStatus('Error: ' + result.error, 'error');
@@ -260,10 +276,9 @@ class SoaringCupEditor {
     showWaypointModal(waypoint = null, index = -1) {
         this.currentEditIndex = index;
         const modal = document.getElementById('waypoint-modal');
-        const title = document.getElementById('modal-title');
         const form = document.getElementById('waypoint-form');
 
-        title.textContent = waypoint ? 'Edit Waypoint' : 'Add Waypoint';
+        modal.label = waypoint ? 'Edit Waypoint' : 'Add Waypoint';
         
         // Reset form and switch to first tab
         form.reset();
@@ -300,13 +315,12 @@ class SoaringCupEditor {
             }
         }
 
-        modal.classList.add('show');
-        document.getElementById('wp-name').focus();
+        modal.show();
+        setTimeout(() => document.getElementById('wp-name').focus(), 100);
     }
 
     hideWaypointModal() {
-        const modal = document.getElementById('waypoint-modal');
-        modal.classList.remove('show');
+        document.getElementById('waypoint-modal').hide();
         this.currentEditIndex = -1;
     }
 
@@ -342,12 +356,11 @@ class SoaringCupEditor {
             legendItems.appendChild(item);
         });
         
-        modal.classList.add('show');
+        modal.show();
     }
 
     hideLegendModal() {
-        const modal = document.getElementById('legend-modal');
-        modal.classList.remove('show');
+        document.getElementById('legend-modal').hide();
     }
 
     async handleWaypointSubmit(event) {
@@ -533,10 +546,10 @@ class SoaringCupEditor {
         
         if (map.classList.contains('adding-waypoint')) {
             map.classList.remove('adding-waypoint');
-            button.innerHTML = '<i class="fas fa-map-pin"></i> Add Waypoint on Map';
+            button.innerHTML = '<i class="fas fa-map-pin" slot="prefix"></i> Add Waypoint on Map';
         } else {
             map.classList.add('adding-waypoint');
-            button.innerHTML = '<i class="fas fa-times"></i> Cancel';
+            button.innerHTML = '<i class="fas fa-times" slot="prefix"></i> Cancel';
             this.showStatus('Click on the map to add a waypoint', 'info');
         }
     }
@@ -668,47 +681,17 @@ class SoaringCupEditor {
     }
 
     switchTab(tabName) {
-        // Update tab buttons
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.tab === tabName);
-        });
-        
-        // Update tab panes
-        document.querySelectorAll('.tab-pane').forEach(pane => {
-            pane.classList.toggle('active', pane.id === `${tabName}-tab`);
-        });
-        
-        // Refresh map if switching to map tab
-        if (tabName === 'map') {
-            setTimeout(() => {
-                this.map.invalidateSize();
-            }, 100);
-        }
-
-        // Initialize task planner map when switching to task tab
-        if (tabName === 'task' && window.taskPlanner) {
-            setTimeout(() => {
-                window.taskPlanner.initMap();
-            }, 100);
-        }
+        document.getElementById('main-tabs').show(tabName);
     }
 
     switchModalTab(tabName) {
-        // Update modal tab buttons
-        document.querySelectorAll('.modal-tab-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.modalTab === tabName);
-        });
-        
-        // Update modal tab panes
-        document.querySelectorAll('.modal-tab-pane').forEach(pane => {
-            pane.classList.toggle('active', pane.id === `modal-${tabName}-tab`);
-        });
+        document.getElementById('modal-tabs').show(tabName);
     }
 
     handleKeyboardShortcuts(event) {
-        // Only handle shortcuts when modal is open
+        // Only handle shortcuts when waypoint modal is open
         const modal = document.getElementById('waypoint-modal');
-        if (!modal.classList.contains('show')) {
+        if (!modal.open) {
             return;
         }
 
@@ -722,9 +705,9 @@ class SoaringCupEditor {
         }
     }
 
-    updateUI() {
+    updateUI(fitBounds = false) {
         this.updateTable();
-        this.updateMapMarkers(); // Use direct call instead of debounced for initial loads
+        this.updateMapMarkers(fitBounds); // Pass fitBounds flag through
         this.updateActionButtons();
         this.updateStatus();
         if (window.taskPlanner) {
@@ -766,9 +749,9 @@ class SoaringCupEditor {
                     </span>
                 </td>
                 <td>
-                    <button class="btn btn-sm btn-secondary" onclick="app.showWaypointModal(app.waypoints[${index}], ${index})">
+                    <sl-button size="small" variant="neutral" onclick="app.showWaypointModal(app.waypoints[${index}], ${index})">
                         <i class="fas fa-edit"></i>
-                    </button>
+                    </sl-button>
                 </td>
             `;
             
@@ -788,7 +771,7 @@ class SoaringCupEditor {
         }, 150); // 150ms delay for smooth updates
     }
 
-    updateMapMarkers() {
+    updateMapMarkers(fitBounds = false) {
         // Clear existing markers from cluster group
         this.markerClusterGroup.clearLayers();
         this.mapMarkers = {};
@@ -831,8 +814,8 @@ class SoaringCupEditor {
             // Add all markers to cluster group at once for better performance
             this.markerClusterGroup.addLayers(markers);
 
-            // Fit bounds if there are waypoints
-            if (this.waypoints.length > 0) {
+            // Fit bounds only when explicitly requested (initial/file load)
+            if (fitBounds && this.waypoints.length > 0) {
                 this.fitMapBounds();
             }
 
@@ -871,14 +854,20 @@ class SoaringCupEditor {
 
     showStatus(message, type = 'info') {
         const statusText = document.getElementById('status-text');
+        const badge = statusText.closest('sl-badge');
         const originalText = statusText.textContent;
-        
+
+        const variantMap = { success: 'success', error: 'danger', warning: 'warning', info: 'neutral' };
+        const variant = variantMap[type] || 'neutral';
+
         statusText.textContent = message;
-        statusText.className = `text-${type}`;
-        
+        statusText.className = '';
+        if (badge) badge.setAttribute('variant', variant);
+
         setTimeout(() => {
             statusText.textContent = originalText;
             statusText.className = '';
+            if (badge) badge.setAttribute('variant', 'neutral');
         }, 3000);
     }
 
@@ -1036,12 +1025,12 @@ class SoaringCupEditor {
         // Action buttons
         let actionsSection = `
             <div class="popup-actions">
-                <button class="btn btn-sm btn-secondary" onclick="app.showWaypointModal(app.waypoints[${index}], ${index})">
+                <sl-button size="small" variant="neutral" onclick="app.showWaypointModal(app.waypoints[${index}], ${index})">
                     <i class="fas fa-edit"></i> Edit
-                </button>
-                <button class="btn btn-sm btn-danger" onclick="app.deleteWaypointFromMap(${index})">
+                </sl-button>
+                <sl-button size="small" variant="danger" onclick="app.deleteWaypointFromMap(${index})">
                     <i class="fas fa-trash"></i> Delete
-                </button>
+                </sl-button>
             </div>
         `;
 
@@ -1199,30 +1188,41 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
-// Reusable confirmation modal (replaces native browser confirm)
+// Reusable confirmation dialog (replaces native browser confirm)
 window.showConfirmModal = function(message) {
     return new Promise((resolve) => {
-        const modal = document.getElementById('confirm-modal');
+        const dialog = document.getElementById('confirm-modal');
         const msgEl = document.getElementById('confirm-modal-message');
         const okBtn = document.getElementById('confirm-modal-ok');
         const cancelBtn = document.getElementById('confirm-modal-cancel');
 
         msgEl.textContent = message;
-        modal.classList.add('show');
+        dialog.show();
 
         let resolved = false;
         function done(result) {
             if (resolved) return;
             resolved = true;
-            modal.classList.remove('show');
-            modal.removeEventListener('click', backdropClick);
+            dialog.hide();
+            cleanup();
             resolve(result);
         }
 
-        function backdropClick(e) { if (e.target === modal) done(false); }
+        function onOk() { done(true); }
+        function onCancel() { done(false); }
+        function onRequestClose(e) {
+            e.preventDefault();
+            done(false);
+        }
 
-        okBtn.addEventListener('click', () => done(true), { once: true });
-        cancelBtn.addEventListener('click', () => done(false), { once: true });
-        modal.addEventListener('click', backdropClick);
+        function cleanup() {
+            okBtn.removeEventListener('click', onOk);
+            cancelBtn.removeEventListener('click', onCancel);
+            dialog.removeEventListener('sl-request-close', onRequestClose);
+        }
+
+        okBtn.addEventListener('click', onOk);
+        cancelBtn.addEventListener('click', onCancel);
+        dialog.addEventListener('sl-request-close', onRequestClose);
     });
 };

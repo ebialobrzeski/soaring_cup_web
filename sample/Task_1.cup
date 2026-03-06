@@ -1,0 +1,13 @@
+name,code,country,lat,lon,elev,style,rwdir,rwlen,rwwidth,freq,desc
+"BIAŁYSTOK KRYWLANY","EPBK","PL",5306.058N,02310.317E,149m,5,267,1350.0m,30.0m,"123.205",""
+"Brańsk","","PL",5244.596N,02250.485E,133m,1,,,,"",""
+"Rutki-Kossaki","","PL",5305.491N,02226.110E,133m,1,,,,"",""
+"Tykocin","","PL",5312.386N,02246.433E,112m,1,,,,"",""
+-----Related Tasks-----
+"Task 1","BIAŁYSTOK KRYWLANY","Brańsk","Rutki-Kossaki","Tykocin","BIAŁYSTOK KRYWLANY"
+Options,NoStart=12:00:00,TaskTime=03:00:00,WpDis=True
+ObsZone=0,Style=0,R1=5000m,A1=90,R2=0m,A2=180,A12=0,Line=1,Move=True,Reduce=False
+ObsZone=1,Style=1,R1=3000m,A1=45,R2=500m,A2=180,A12=0,Line=0,Move=True,Reduce=False
+ObsZone=2,Style=1,R1=3000m,A1=45,R2=500m,A2=180,A12=0,Line=0,Move=True,Reduce=False
+ObsZone=3,Style=1,R1=3000m,A1=45,R2=500m,A2=180,A12=0,Line=0,Move=True,Reduce=False
+ObsZone=4,Style=1,R1=3000m,A1=45,R2=500m,A2=180,A12=0,Line=0,Move=True,Reduce=False

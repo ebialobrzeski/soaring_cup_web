@@ -44,18 +44,41 @@ class TaskPlanner {
 
         this.map = L.map('task-map', {
             preferCanvas: true,
-            zoomControl: true
+            zoomControl: true,
+            zoomAnimation: true,
+            fadeAnimation: true,
+            markerZoomAnimation: false
         }).setView([52.0, 19.0], 6);
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenStreetMap',
-            maxZoom: 18
+            maxZoom: 18,
+            updateWhenIdle: true,
+            updateWhenZooming: false,
+            keepBuffer: 2
         }).addTo(this.map);
 
         this.airspaceLayer = L.layerGroup().addTo(this.map);
         this.taskLayer = L.layerGroup().addTo(this.map);
         this.markerLayer = L.layerGroup().addTo(this.map);
-        this.waypointLayer = L.layerGroup().addTo(this.map);
+
+        // Use cluster group for background waypoint markers
+        this.waypointCluster = L.markerClusterGroup({
+            maxClusterRadius: 30,
+            disableClusteringAtZoom: 13,
+            spiderfyOnMaxZoom: true,
+            showCoverageOnHover: false,
+            zoomToBoundsOnClick: true,
+            removeOutsideVisibleBounds: true,
+            animate: false,
+            animateAddingMarkers: false,
+            chunkedLoading: true,
+            chunkInterval: 100,
+            chunkDelay: 50
+        });
+        this.waypointCluster.addTo(this.map);
+        // Keep waypointLayer as alias so existing clearLayers() calls still work
+        this.waypointLayer = this.waypointCluster;
 
         this.initialized = true;
 
@@ -65,49 +88,80 @@ class TaskPlanner {
         // Show loaded waypoints immediately
         this.renderWaypointMarkers();
 
-        // Restore saved task state
+        // If there are waypoints but no saved task, fit to all waypoints
+        const hasWaypoints = window.app && window.app.waypoints && window.app.waypoints.length > 0;
+        if (hasWaypoints) {
+            const wps = window.app.waypoints.filter(wp => wp.latitude != null && wp.longitude != null);
+            if (wps.length > 0) {
+                const bounds = L.latLngBounds(wps.map(wp => [wp.latitude, wp.longitude]));
+                if (bounds.isValid()) {
+                    setTimeout(() => this.map.fitBounds(bounds.pad(0.05)), 100);
+                }
+            }
+        }
+
+        // Restore saved task state — fitTaskBounds is called inside after load
         this.loadTaskState();
     }
 
     /** Setup all event listeners — called from SoaringCupEditor.initializeApp */
     setup() {
+        // Advanced options toggle (cogwheel button)
+        const advancedToggle = document.getElementById('task-advanced-toggle');
+        if (advancedToggle) {
+            advancedToggle.addEventListener('click', () => {
+                const panel = document.getElementById('task-advanced-panel');
+                const isOpen = panel.style.display !== 'none';
+                panel.style.display = isOpen ? 'none' : 'block';
+                advancedToggle.name = isOpen ? 'gear' : 'gear-fill';
+            });
+        }
+
+        // Wind card collapse toggle — starts collapsed by default
+        const windToggle = document.getElementById('wind-card-toggle');
+        if (windToggle) {
+            const windBody = document.getElementById('wind-card-body');
+            // Collapse on init
+            windBody.style.display = 'none';
+            windToggle.classList.add('collapsed');
+
+            windToggle.addEventListener('click', () => {
+                const isOpen = windBody.style.display !== 'none';
+                windBody.style.display = isOpen ? 'none' : '';
+                windToggle.classList.toggle('collapsed', isOpen);
+            });
+        }
+
         // Search
         const searchInput = document.getElementById('task-wp-search');
-        searchInput.addEventListener('input', () => this.onSearch(searchInput.value));
-        searchInput.addEventListener('focus', () => this.onSearch(searchInput.value));
+        searchInput.addEventListener('sl-input', () => this.onSearch(searchInput.value));
+        searchInput.addEventListener('sl-focus', () => this.onSearch(searchInput.value));
+        searchInput.addEventListener('sl-clear', () => {
+            document.getElementById('task-wp-results').innerHTML = '';
+        });
         document.addEventListener('click', (e) => {
             if (!e.target.closest('#task-wp-search') && !e.target.closest('#task-wp-results')) {
                 document.getElementById('task-wp-results').innerHTML = '';
             }
         });
 
-        // Buttons
-        document.getElementById('task-download-btn').addEventListener('click', () => {
-            const menu = document.getElementById('task-download-menu');
-            const expanded = menu.classList.toggle('show');
-            document.getElementById('task-download-btn').setAttribute('aria-expanded', expanded);
-        });
-        document.addEventListener('click', (e) => {
-            if (!document.getElementById('task-download-dropdown').contains(e.target)) {
-                document.getElementById('task-download-menu').classList.remove('show');
-                document.getElementById('task-download-btn').setAttribute('aria-expanded', 'false');
-            }
+        // Download dropdown (Shoelace sl-dropdown)
+        document.getElementById('task-download-dropdown').addEventListener('sl-select', (e) => {
+            const format = e.detail.item.value;
+            window.taskPlanner.downloadTask(format);
         });
         document.getElementById('task-qr-btn').addEventListener('click', () => this.showQR());
         document.getElementById('task-share-btn').addEventListener('click', () => this.shareTask());
-        document.getElementById('share-modal-close').addEventListener('click', () => {
-            document.getElementById('share-modal').classList.remove('show');
-        });
         document.getElementById('share-copy-btn').addEventListener('click', () => {
             const input = document.getElementById('share-url-input');
             navigator.clipboard.writeText(input.value).then(() => {
                 const btn = document.getElementById('share-copy-btn');
                 const orig = btn.innerHTML;
-                btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
-                btn.classList.replace('btn-primary', 'btn-success');
+                btn.innerHTML = '<i class="fas fa-check" slot="prefix"></i> Copied!';
+                btn.variant = 'success';
                 setTimeout(() => {
                     btn.innerHTML = orig;
-                    btn.classList.replace('btn-success', 'btn-primary');
+                    btn.variant = 'primary';
                 }, 2000);
             }).catch(() => {
                 document.getElementById('share-url-input').select();
@@ -116,8 +170,7 @@ class TaskPlanner {
         });
         document.getElementById('task-clear-btn').addEventListener('click', () => this.clearTask());
 
-        // OZ modal
-        document.getElementById('task-point-modal-close').addEventListener('click', () => this.hideOZModal());
+        // OZ modal (sl-dialog)
         document.getElementById('oz-cancel-btn').addEventListener('click', () => this.hideOZModal());
         document.getElementById('oz-save-btn').addEventListener('click', () => this.saveOZ());
         document.getElementById('oz-preset').addEventListener('change', (e) => this.applyPreset(e.target.value));
@@ -165,6 +218,14 @@ class TaskPlanner {
             document.getElementById('airspace-clear-btn').addEventListener('click', () => {
                 this.airspaces = [];
                 if (this.airspaceLayer) this.airspaceLayer.clearLayers();
+                // Remove mousemove handler and hide tooltip so it doesn't linger
+                if (this._airspaceMoveHandler) {
+                    this.map.off('mousemove', this._airspaceMoveHandler);
+                    this._airspaceMoveHandler = null;
+                }
+                if (this._airspaceTooltipEl) {
+                    this._airspaceTooltipEl.style.display = 'none';
+                }
                 document.getElementById('airspace-filter-panel').style.display = 'none';
                 document.getElementById('airspace-clear-btn').style.display = 'none';
             });
@@ -189,10 +250,7 @@ class TaskPlanner {
 
             // XCSoar repository button
             document.getElementById('xcsoar-repo-btn').addEventListener('click', () => this.openRepoModal('airspace'));
-            document.getElementById('xcsoar-repo-close').addEventListener('click', () => this.closeRepoModal());
-            document.getElementById('xcsoar-repo-modal').addEventListener('click', (e) => {
-                if (e.target.id === 'xcsoar-repo-modal') this.closeRepoModal();
-            });
+            document.getElementById('xcsoar-repo-modal').addEventListener('sl-request-close', () => this.closeRepoModal());
             document.getElementById('xcsoar-repo-type').addEventListener('change', () => this._filterRepoList());
             document.getElementById('xcsoar-repo-search').addEventListener('input', () => this._filterRepoList());
             const repoMapBtn = document.getElementById('xcsoar-repo-map-btn');
@@ -200,24 +258,16 @@ class TaskPlanner {
 
             // Wind arrow live update
             ['task-wind-dir', 'task-wind-speed', 'task-tas'].forEach(id => {
-                document.getElementById(id).addEventListener('input', () => {
+                document.getElementById(id).addEventListener('sl-input', () => {
                     this.updateWindArrow();
                     this.refreshUI();
                 });
             });
         }
 
-        // QR modal
-        document.getElementById('task-qr-close').addEventListener('click', () => this.hideQRModal());
+        // QR modal (sl-dialog)
         document.getElementById('task-qr-download-img').addEventListener('click', () => this.downloadQRImage());
         document.getElementById('task-qr-download-cup').addEventListener('click', () => this.downloadTask());
-
-        document.getElementById('task-qr-modal').addEventListener('click', (e) => {
-            if (e.target.id === 'task-qr-modal') this.hideQRModal();
-        });
-        document.getElementById('task-point-modal').addEventListener('click', (e) => {
-            if (e.target.id === 'task-point-modal') this.hideOZModal();
-        });
     }
 
     // ──────────── Waypoint search ────────────
@@ -394,7 +444,7 @@ class TaskPlanner {
         const tp = this.taskPoints[taskIdx];
         const oz = tp.obsZone;
 
-        document.getElementById('task-point-modal-title').textContent =
+        document.getElementById('task-point-modal').label =
             `Edit OZ: ${tp.waypoint.name} (${this.pointLabel(taskIdx)})`;
 
         document.getElementById('oz-r1').value = oz.r1;
@@ -408,14 +458,13 @@ class TaskPlanner {
         document.getElementById('oz-bearing').disabled = !hasFixed;
         document.getElementById('oz-bearing').value = oz.fixedBearing != null ? Math.round(oz.fixedBearing) : 0;
 
-        // Guess preset
         document.getElementById('oz-preset').value = this.guessPreset(oz);
 
-        document.getElementById('task-point-modal').classList.add('show');
+        document.getElementById('task-point-modal').show();
     }
 
     hideOZModal() {
-        document.getElementById('task-point-modal').classList.remove('show');
+        document.getElementById('task-point-modal').hide();
         this.editIndex = -1;
     }
 
@@ -529,18 +578,18 @@ class TaskPlanner {
                     ${idx > 0 ? `<span class="task-point-dist">${this.legDistance(idx)} km${this.legTime(idx) ? ' · ' + this.legTime(idx) : ''}</span>` : ''}
                 </div>
                 ${viewMode ? '' : `<div class="task-point-actions">
-                    <button class="btn btn-sm btn-secondary" title="Move up" onclick="window.taskPlanner.movePoint(${idx},-1)" ${idx === 0 ? 'disabled' : ''}>
+                    <sl-button size="small" variant="neutral" title="Move up" onclick="window.taskPlanner.movePoint(${idx},-1)" ${idx === 0 ? 'disabled' : ''}>
                         <i class="fas fa-arrow-up"></i>
-                    </button>
-                    <button class="btn btn-sm btn-secondary" title="Move down" onclick="window.taskPlanner.movePoint(${idx},1)" ${idx === this.taskPoints.length - 1 ? 'disabled' : ''}>
+                    </sl-button>
+                    <sl-button size="small" variant="neutral" title="Move down" onclick="window.taskPlanner.movePoint(${idx},1)" ${idx === this.taskPoints.length - 1 ? 'disabled' : ''}>
                         <i class="fas fa-arrow-down"></i>
-                    </button>
-                    <button class="btn btn-sm btn-secondary" title="Edit zone" onclick="window.taskPlanner.showOZModal(${idx})">
+                    </sl-button>
+                    <sl-button size="small" variant="neutral" title="Edit zone" onclick="window.taskPlanner.showOZModal(${idx})">
                         <i class="fas fa-cog"></i>
-                    </button>
-                    <button class="btn btn-sm btn-danger" title="Remove" onclick="window.taskPlanner.removePoint(${idx})">
+                    </sl-button>
+                    <sl-button size="small" variant="danger" title="Remove" onclick="window.taskPlanner.removePoint(${idx})">
                         <i class="fas fa-times"></i>
-                    </button>
+                    </sl-button>
                 </div>`}
             </div>`;
         }).join('');
@@ -629,6 +678,7 @@ class TaskPlanner {
         // Build set of indices already in the task — skip these so task markers get clicks
         const inTask = new Set(this.taskPoints.map(tp => tp.waypointIndex));
 
+        const markers = [];
         for (let i = 0; i < waypoints.length; i++) {
             const wp = waypoints[i];
             if (wp.latitude == null || wp.longitude == null) continue;
@@ -639,7 +689,7 @@ class TaskPlanner {
             const marker = L.marker([wp.latitude, wp.longitude], {
                 icon: icon,
                 opacity: 0.7
-            }).addTo(this.waypointLayer);
+            });
 
             marker.bindTooltip(this.escapeHtml(wp.name), {
                 direction: 'top',
@@ -652,6 +702,13 @@ class TaskPlanner {
             marker.on('click', () => {
                 this.addPoint(idx);
             });
+
+            markers.push(marker);
+        }
+
+        // Batch add for cluster group performance
+        if (markers.length > 0) {
+            this.waypointLayer.addLayers(markers);
         }
     }
 
@@ -670,23 +727,23 @@ class TaskPlanner {
                     <strong>${label}: ${this.escapeHtml(tp.waypoint.name)}</strong>
                     <div class="task-popup-bearing-info">Bearing: ${bearingInfo}</div>
                     <div class="task-popup-actions">
-                        <button class="btn btn-sm btn-secondary" onclick="window.taskPlanner.startBearingEdit(${taskIdx}); window.taskPlanner.map.closePopup();">
+                        <sl-button size="small" variant="neutral" onclick="window.taskPlanner.startBearingEdit(${taskIdx}); window.taskPlanner.map.closePopup();">
                             <i class="fas fa-sync-alt"></i> Change Bearing
-                        </button>
-                        <button class="btn btn-sm btn-secondary" onclick="window.taskPlanner.resetBearing(${taskIdx}); window.taskPlanner.map.closePopup();">
+                        </sl-button>
+                        <sl-button size="small" variant="neutral" onclick="window.taskPlanner.resetBearing(${taskIdx}); window.taskPlanner.map.closePopup();">
                             <i class="fas fa-undo"></i> Auto
-                        </button>
+                        </sl-button>
                     </div>
                     <div class="task-popup-actions" style="margin-top:4px;">
-                        <button class="btn btn-sm btn-secondary" onclick="window.taskPlanner.showOZModal(${taskIdx}); window.taskPlanner.map.closePopup();">
+                        <sl-button size="small" variant="neutral" onclick="window.taskPlanner.showOZModal(${taskIdx}); window.taskPlanner.map.closePopup();">
                             <i class="fas fa-cog"></i> Edit OZ
-                        </button>
-                        <button class="btn btn-sm btn-primary" onclick="window.taskPlanner.addPoint(${tp.waypointIndex}); window.taskPlanner.map.closePopup();">
+                        </sl-button>
+                        <sl-button size="small" variant="primary" onclick="window.taskPlanner.addPoint(${tp.waypointIndex}); window.taskPlanner.map.closePopup();">
                             <i class="fas fa-plus"></i> Add Again
-                        </button>
-                        <button class="btn btn-sm btn-danger" onclick="window.taskPlanner.removePoint(${taskIdx}); window.taskPlanner.map.closePopup();">
+                        </sl-button>
+                        <sl-button size="small" variant="danger" onclick="window.taskPlanner.removePoint(${taskIdx}); window.taskPlanner.map.closePopup();">
                             <i class="fas fa-times"></i> Remove
-                        </button>
+                        </sl-button>
                     </div>
                 </div>
             `)
@@ -1029,7 +1086,6 @@ class TaskPlanner {
         }
         summary.style.display = 'block';
         document.getElementById('task-total-distance').textContent = this.totalDistance() + ' km';
-        document.getElementById('task-leg-count').textContent = this.taskPoints.length - 1;
         const t = this.totalTime();
         const timeRow = document.getElementById('task-total-time-row');
         if (timeRow) {
@@ -1066,10 +1122,6 @@ class TaskPlanner {
     // ──────────── Export: download ────────────
 
     async downloadTask(format = 'cup') {
-        // Close dropdown
-        document.getElementById('task-download-menu').classList.remove('show');
-        document.getElementById('task-download-btn').setAttribute('aria-expanded', 'false');
-
         const payload = this.buildPayload();
         payload.format = format;
         const extMap = { cup: '.cup', tsk: '.tsk', xctsk: '.xctsk', lkt: '.lkt' };
@@ -1114,7 +1166,7 @@ class TaskPlanner {
             }
             document.getElementById('share-url-input').value = data.url;
             document.getElementById('share-open-link').href = data.url;
-            document.getElementById('share-modal').classList.add('show');
+            document.getElementById('share-modal').show();
         } catch (e) {
             alert('Share failed: ' + e.message);
         }
@@ -1228,7 +1280,7 @@ class TaskPlanner {
 
         const container = document.getElementById('task-qr-canvas');
         container.innerHTML = '<p style="text-align:center;padding:20px;">Generating QR code…</p>';
-        document.getElementById('task-qr-modal').classList.add('show');
+        document.getElementById('task-qr-modal').show();
 
         const payload = {
             points: this.taskPoints.map(tp => ({
@@ -1267,7 +1319,7 @@ class TaskPlanner {
     }
 
     hideQRModal() {
-        document.getElementById('task-qr-modal').classList.remove('show');
+        document.getElementById('task-qr-modal').hide();
     }
 
     downloadQRImage() {
@@ -1322,7 +1374,9 @@ class TaskPlanner {
 
                 if (this.taskPoints.length > 0) {
                     this.refreshUI();
-                    setTimeout(() => this.fitTaskBounds(), 50);
+                    // Recalculate map size (container may have changed during Shoelace init)
+                    this.map.invalidateSize();
+                    setTimeout(() => this.fitTaskBounds(), 100);
                 }
             } catch (e) {
                 // Silently ignore
@@ -1626,7 +1680,7 @@ class TaskPlanner {
 
     async openRepoModal(lockedType) {
         this._repoLockedType = lockedType || null;
-        document.getElementById('xcsoar-repo-modal').classList.add('show');
+        document.getElementById('xcsoar-repo-modal').show();
         document.getElementById('xcsoar-repo-search').value = '';
 
         const typeSelect = document.getElementById('xcsoar-repo-type');
@@ -1662,7 +1716,7 @@ class TaskPlanner {
     }
 
     closeRepoModal() {
-        document.getElementById('xcsoar-repo-modal').classList.remove('show');
+        document.getElementById('xcsoar-repo-modal').hide();
     }
 
     _filterRepoList() {
@@ -1698,9 +1752,9 @@ class TaskPlanner {
                     ${typeBadge}
                     <span class="xcsoar-repo-item-name">${area}${desc}${update}</span>
                 </div>
-                <button class="btn btn-sm btn-primary xcsoar-load-btn" data-idx="${i}">
+                <sl-button size="small" variant="primary" class="xcsoar-load-btn" data-idx="${i}">
                     <i class="fas fa-download"></i> Load
-                </button>
+                </sl-button>
             </div>`;
         }).join('');
 
@@ -1715,9 +1769,8 @@ class TaskPlanner {
     }
 
     async _loadRepoEntry(entry, btn) {
-        const origHtml = btn.innerHTML;
+        btn.loading = true;
         btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
         try {
             const proxyUrl = '/api/xcsoar-proxy?url=' + encodeURIComponent(entry.uri);
             const resp = await fetch(proxyUrl);
@@ -1751,8 +1804,8 @@ class TaskPlanner {
         } catch (e) {
             alert('Load failed: ' + e.message);
         } finally {
+            btn.loading = false;
             btn.disabled = false;
-            btn.innerHTML = origHtml;
         }
     }
 
