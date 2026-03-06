@@ -298,9 +298,16 @@ class TaskPlanner {
     }
 
     clearTask() {
-        if (this.taskPoints.length > 0 && !confirm('Clear all task points?')) return;
-        this.taskPoints = [];
-        this.refreshUI();
+        if (this.taskPoints.length === 0) {
+            this.taskPoints = [];
+            this.refreshUI();
+            return;
+        }
+        window.showConfirmModal('Clear all task points?').then(confirmed => {
+            if (!confirmed) return;
+            this.taskPoints = [];
+            this.refreshUI();
+        });
     }
 
     // ──────────── Task file import ────────────

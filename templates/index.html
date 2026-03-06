@@ -3,7 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GlidePlan</title>
+    <title>GlidePlan &ndash; Soaring Task &amp; Waypoint Editor</title>
+    <meta name="description" content="Plan, edit and share soaring tasks and waypoint files. Free online tool for glider pilots.">
+    <!-- Open Graph -->
+    <meta property="og:title" content="GlidePlan &ndash; Soaring Task &amp; Waypoint Editor">
+    <meta property="og:description" content="Plan, edit and share soaring tasks and waypoint files. Free online tool for glider pilots.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="{{ request.host_url }}">
+    <meta property="og:image" content="{{ request.host_url }}static/images/icon-512.png">
+    <meta property="og:site_name" content="GlidePlan">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="GlidePlan &ndash; Soaring Task &amp; Waypoint Editor">
+    <meta name="twitter:description" content="Plan, edit and share soaring tasks and waypoint files. Free online tool for glider pilots.">
+    <meta name="twitter:image" content="{{ request.host_url }}static/images/icon-512.png">
+    <link rel="icon" href="{{ url_for('static', filename='images/favicon.ico') }}" sizes="any">
+    <link rel="icon" href="{{ url_for('static', filename='images/icon-192.png') }}" type="image/png" sizes="192x192">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='images/apple-touch-icon.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
@@ -275,6 +290,16 @@
             </div>
         </div>
     </div>
+
+    <footer class="site-footer">
+        <div class="site-footer-inner">
+            <span>GlidePlan &mdash; free tool for glider pilots</span>
+            <span class="footer-sep">&middot;</span>
+            <a href="https://www.buymeacoffee.com/emil.b" target="_blank" rel="noopener noreferrer">
+                <i class="fas fa-coffee"></i> Support this project
+            </a>
+        </div>
+    </footer>
 
     <!-- Waypoint Edit Modal -->
     <div id="waypoint-modal" class="modal">
@@ -633,6 +658,22 @@
                     </tbody>
                 </table>
                 <p class="oz-info-note">⚠ XCTSK QR v2 supports sector angle (A1) and line flag only — inner radius (R2) is not transmitted. All apps use CUP file for full fidelity.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirm Modal -->
+    <div id="confirm-modal" class="modal">
+        <div class="modal-content confirm-modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-exclamation-triangle"></i> Confirm</h2>
+            </div>
+            <div class="confirm-modal-body">
+                <p id="confirm-modal-message"></p>
+                <div class="form-actions">
+                    <button id="confirm-modal-cancel" class="btn btn-secondary">Cancel</button>
+                    <button id="confirm-modal-ok" class="btn btn-danger">OK</button>
+                </div>
             </div>
         </div>
     </div>

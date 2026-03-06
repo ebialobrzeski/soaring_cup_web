@@ -212,9 +212,8 @@ class SoaringCupEditor {
 
     async newFile() {
         if (this.waypoints.length > 0) {
-            if (!confirm('This will clear all current waypoints. Continue?')) {
-                return;
-            }
+            const confirmed = await window.showConfirmModal('This will clear all current waypoints. Continue?');
+            if (!confirmed) return;
         }
 
         try {
@@ -448,9 +447,8 @@ class SoaringCupEditor {
         }
 
         const count = this.selectedWaypoints.size;
-        if (!confirm(`Delete ${count} waypoint(s)?`)) {
-            return;
-        }
+        const confirmed = await window.showConfirmModal(`Delete ${count} waypoint(s)?`);
+        if (!confirmed) return;
 
         try {
             // Delete in reverse order to maintain indices
@@ -480,9 +478,8 @@ class SoaringCupEditor {
             return;
         }
 
-        if (!confirm(`Delete waypoint "${waypoint.name}"?`)) {
-            return;
-        }
+        const confirmed = await window.showConfirmModal(`Delete waypoint "${waypoint.name}"?`);
+        if (!confirmed) return;
 
         try {
             const response = await fetch(`/api/waypoints/${index}`, {
@@ -1201,3 +1198,31 @@ style.textContent = `
     }
 `;
 document.head.appendChild(style);
+
+// Reusable confirmation modal (replaces native browser confirm)
+window.showConfirmModal = function(message) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('confirm-modal');
+        const msgEl = document.getElementById('confirm-modal-message');
+        const okBtn = document.getElementById('confirm-modal-ok');
+        const cancelBtn = document.getElementById('confirm-modal-cancel');
+
+        msgEl.textContent = message;
+        modal.classList.add('show');
+
+        let resolved = false;
+        function done(result) {
+            if (resolved) return;
+            resolved = true;
+            modal.classList.remove('show');
+            modal.removeEventListener('click', backdropClick);
+            resolve(result);
+        }
+
+        function backdropClick(e) { if (e.target === modal) done(false); }
+
+        okBtn.addEventListener('click', () => done(true), { once: true });
+        cancelBtn.addEventListener('click', () => done(false), { once: true });
+        modal.addEventListener('click', backdropClick);
+    });
+};

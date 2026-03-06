@@ -1784,3 +1784,52 @@ body.view-mode #task-share-btn {
     color: var(--text-secondary);
     font-size: 13px;
 }
+
+/* ── Confirmation Modal ────────────────────────── */
+.confirm-modal-content {
+    max-width: 420px;
+}
+
+.confirm-modal-body {
+    padding: 24px 25px;
+}
+
+.confirm-modal-body p {
+    margin-bottom: 24px;
+    color: var(--text-primary);
+    font-size: 15px;
+    line-height: 1.5;
+}
+
+/* ── Site Footer ───────────────────────────────── */
+.site-footer {
+    background-color: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 14px 0;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 8px;
+}
+
+.site-footer-inner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.site-footer a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition: color 0.15s;
+}
+
+.site-footer a:hover {
+    color: var(--primary);
+}
+
+.footer-sep {
+    color: var(--border);
+}
