@@ -25,9 +25,13 @@ coverage.xml
 *.db
 uploads/*
 data/*
+logs/
+postgres/
 .vscode
 .idea
 *.md
+!ai_planner_instructions.md
+README.md.old
 .env
 .DS_Store
 docker-deploy/

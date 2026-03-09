@@ -12,9 +12,9 @@ services:
     ports:
       - "5434:5432"
     volumes:
-      - ./postgres/data:/var/lib/postgresql/data
+      - ./postgres/data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-glideplan}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-glideplan} -d ${POSTGRES_DB:-gliding_forecast}"]
       interval: 10s
       timeout: 5s
       retries: 5
