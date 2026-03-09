@@ -1,7 +1,7 @@
 services:
-  postgres:
+  postgres_gliding:
     image: postgres:18
-    container_name: postgres
+    container_name: postgres_gliding
     restart: always
     env_file:
       - .env
@@ -29,7 +29,7 @@ services:
     environment:
       - FLASK_ENV=production
       - SECRET_KEY=${SECRET_KEY:-change_this_secret_key_in_production}
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-glideplan}:${POSTGRES_PASSWORD:-changeme_secure_password}@postgres:5432/${POSTGRES_DB:-gliding_forecast}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-glideplan}:${POSTGRES_PASSWORD:-changeme_secure_password}@postgres_gliding:5432/${POSTGRES_DB:-gliding_forecast}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - WINDY_API_KEY=${WINDY_API_KEY:-}
       - OPENAIP_API_KEY=${OPENAIP_API_KEY:-}
