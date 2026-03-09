@@ -204,8 +204,11 @@ class TaskPlanner {
             }
         });
 
-        // Airspace file
+        // Airspace — OpenAIP fetch (primary) + local file import (secondary)
         if (!window.VIEW_MODE) {
+            document.getElementById('airspace-openaip-btn').addEventListener('click', () => {
+                this.fetchOpenAipAirspace();
+            });
             document.getElementById('airspace-open-btn').addEventListener('click', () => {
                 document.getElementById('airspace-file-input').click();
             });
@@ -248,8 +251,7 @@ class TaskPlanner {
             document.getElementById('airspace-alt-min-slider').addEventListener('input', updateAltSliders);
             document.getElementById('airspace-alt-max-slider').addEventListener('input', updateAltSliders);
 
-            // XCSoar repository button
-            document.getElementById('xcsoar-repo-btn').addEventListener('click', () => this.openRepoModal('airspace'));
+            // XCSoar repository button (waypoints only)
             document.getElementById('xcsoar-repo-modal').addEventListener('sl-request-close', () => this.closeRepoModal());
             document.getElementById('xcsoar-repo-type').addEventListener('change', () => this._filterRepoList());
             document.getElementById('xcsoar-repo-search').addEventListener('input', () => this._filterRepoList());
@@ -268,6 +270,15 @@ class TaskPlanner {
         // QR modal (sl-dialog)
         document.getElementById('task-qr-download-img').addEventListener('click', () => this.downloadQRImage());
         document.getElementById('task-qr-download-cup').addEventListener('click', () => this.downloadTask());
+
+        // Account save/browse task buttons
+        document.getElementById('browse-tasks-btn')?.addEventListener('click', () => window.taskBrowser?.open());
+        document.getElementById('save-task-btn')?.addEventListener('click', () => this.showSaveTaskDialog());
+        document.getElementById('my-tasks-btn')?.addEventListener('click', () => this.showMyTasksDialog());
+
+        // Save task dialog actions
+        document.getElementById('save-task-cancel')?.addEventListener('click', () => document.getElementById('save-task-dialog').hide());
+        document.getElementById('save-task-submit')?.addEventListener('click', () => this.handleSaveTaskSubmit());
     }
 
     // ──────────── Waypoint search ────────────
@@ -317,6 +328,12 @@ class TaskPlanner {
         const waypoints = window.app ? window.app.waypoints : [];
         const wp = waypoints[waypointIndex];
         if (!wp) return;
+
+        // Prevent the same waypoint twice in a row
+        if (this.taskPoints.length > 0) {
+            const last = this.taskPoints[this.taskPoints.length - 1];
+            if (last.waypointIndex === waypointIndex) return;
+        }
 
         const isFirst = this.taskPoints.length === 0;
         // Default OZ based on position
@@ -1421,6 +1438,41 @@ class TaskPlanner {
 
     // ──────────── Airspace ────────────
 
+    /** Fetch airspace zones from OpenAIP for the current map view */
+    async fetchOpenAipAirspace() {
+        if (!this.map) return;
+        const bounds = this.map.getBounds();
+        const params = new URLSearchParams({
+            south: bounds.getSouth().toFixed(4),
+            west:  bounds.getWest().toFixed(4),
+            north: bounds.getNorth().toFixed(4),
+            east:  bounds.getEast().toFixed(4),
+        });
+
+        const btn = document.getElementById('airspace-openaip-btn');
+        if (btn) { btn.loading = true; btn.disabled = true; }
+
+        try {
+            const resp = await fetch('/api/airspace/openaip?' + params);
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.error || resp.statusText);
+            }
+            const zones = await resp.json();
+            this.airspaces = zones;
+            document.getElementById('airspace-file-name').textContent = 'OpenAIP';
+            document.getElementById('airspace-count').textContent = zones.length + ' zones';
+            document.getElementById('airspace-filter-panel').style.display = '';
+            document.getElementById('airspace-clear-btn').style.display = '';
+            this._updateAltFill();
+            this.renderAirspaces();
+        } catch (err) {
+            alert('Failed to fetch OpenAIP airspace: ' + err.message);
+        } finally {
+            if (btn) { btn.loading = false; btn.disabled = false; }
+        }
+    }
+
     loadAirspaceFile(file) {
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -1510,6 +1562,7 @@ class TaskPlanner {
         if (c === 'CTR')                       return { color: '#7c3aed', fillOpacity: 0.10 };
         if (c.includes('RMZ'))                 return { color: '#0891b2', fillOpacity: 0.08 };
         if (c.includes('TMZ'))                 return { color: '#6b7280', fillOpacity: 0.06 };
+        if (c === 'W')                         return { color: '#16a34a', fillOpacity: 0.06 };
         if (c === 'C' || c === 'B')            return { color: '#2563eb', fillOpacity: 0.10 };
         if (c === 'A')                         return { color: '#1e3a8a', fillOpacity: 0.14 };
         if (c === 'E')                         return { color: '#3b82f6', fillOpacity: 0.06 };
@@ -1609,7 +1662,12 @@ class TaskPlanner {
                 let row = `<div class="astt-entry">`;
                 row += `<div class="astt-name">${this.escapeHtml(as.name || as.cls)}</div>`;
                 row += `<div class="astt-meta">Class&nbsp;<strong>${this.escapeHtml(as.cls)}</strong>`;
+                if (as.type) row += `&ensp;(${this.escapeHtml(as.type)})`;
                 row += `&emsp;${this.escapeHtml(this.formatAlt(as.altLower))}&thinsp;&ndash;&thinsp;${this.escapeHtml(this.formatAlt(as.altUpper))}</div>`;
+                const flags = [];
+                if (as.requires_transponder) flags.push('XPDR');
+                if (as.requires_flight_plan) flags.push('FPL');
+                if (flags.length) row += `<div class="astt-flags">${flags.join(' · ')}</div>`;
                 if (as.time) row += `<div class="astt-time"><i class="fas fa-clock"></i> ${this.escapeHtml(as.time)}</div>`;
                 row += `</div>`;
                 return row;
@@ -1815,6 +1873,117 @@ class TaskPlanner {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    // ──────────── Save / browse tasks ────────────
+
+    /** Load a task returned from BrowseDialog into the planner */
+    loadTaskData(td) {
+        // td is a to_dict() result; points live inside task_data.points
+        const points = td?.task_data?.points ?? td?.points;
+        if (!Array.isArray(points)) return;
+        this.taskPoints = points.map(p => ({
+            waypointIndex: -1,  // not in local list
+            waypoint: p.waypoint,
+            obsZone: p.obs_zone || p.obsZone || null
+        }));
+        const nameEl = document.getElementById('task-name');
+        if (nameEl && td.name) nameEl.value = td.name;
+        this.refreshUI();
+        this.saveTaskState();
+    }
+
+    showSaveTaskDialog() {
+        const dialog = document.getElementById('save-task-dialog');
+        if (!dialog) return;
+        const nameEl = document.getElementById('save-task-name');
+        if (nameEl) nameEl.value = document.getElementById('task-name')?.value || '';
+        const visRow = document.getElementById('save-task-visibility-row');
+        if (visRow) visRow.hidden = !(window.authManager?.isPremium());
+        const errEl = document.getElementById('save-task-error');
+        if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+        dialog.show();
+    }
+
+    async handleSaveTaskSubmit() {
+        const name = document.getElementById('save-task-name')?.value?.trim();
+        const errorEl = document.getElementById('save-task-error');
+        const showError = (msg) => { errorEl.textContent = msg; errorEl.style.display = msg ? '' : 'none'; };
+        if (!name) { showError('Name is required.'); return; }
+        const desc = document.getElementById('save-task-desc')?.value?.trim() || '';
+        const isPublic = document.getElementById('save-task-public')?.checked ?? true;
+
+        const points = this.taskPoints.map(tp => ({
+            waypoint: tp.waypoint,
+            obs_zone: tp.obsZone || null
+        }));
+        const totalDistance = parseFloat(document.getElementById('task-total-dist')?.textContent) || 0;
+
+        showError('');
+        try {
+            const resp = await fetch('/api/tasks', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name, description: desc, is_public: isPublic, points, total_distance: totalDistance})
+            });
+            const data = await resp.json();
+            if (!resp.ok) { showError(data.error || 'Save failed.'); return; }
+            document.getElementById('save-task-dialog').hide();
+        } catch {
+            showError('Network error. Please try again.');
+        }
+    }
+
+    async showMyTasksDialog() {
+        const dialog = document.getElementById('my-tasks-dialog');
+        const list = document.getElementById('my-tasks-list');
+        if (!dialog || !list) return;
+        list.innerHTML = '<p style="padding:.5rem">Loading…</p>';
+        dialog.show();
+        try {
+            const resp = await fetch('/api/tasks');
+            const data = await resp.json();
+            if (!resp.ok) { list.innerHTML = '<p style="padding:.5rem">Failed to load tasks.</p>'; return; }
+            const tasks = Array.isArray(data) ? data : (data.tasks || []);
+            if (!tasks.length) { list.innerHTML = '<p class="browse-empty">No saved tasks yet.</p>'; return; }
+            list.innerHTML = tasks.map(t => `
+                <div class="browse-item" data-id="${t.id}">
+                    <div class="browse-item-main">
+                        <span class="browse-item-name">${this.escapeHtml(t.name)}</span>
+                        <span class="browse-item-meta">${t.total_distance ? t.total_distance + ' km' : ''} · ${t.is_public ? 'Public' : 'Private'}</span>
+                    </div>
+                    <div style="display:flex;gap:.4rem;flex-shrink:0">
+                        <sl-button size="small" data-action="load-task" data-id="${t.id}">Load</sl-button>
+                        <sl-button size="small" variant="danger" data-action="delete-task" data-id="${t.id}">Delete</sl-button>
+                    </div>
+                </div>`).join('');
+            list.querySelectorAll('[data-action="load-task"]').forEach(btn => {
+                btn.addEventListener('click', () => this._loadTask(btn.dataset.id, dialog));
+            });
+            list.querySelectorAll('[data-action="delete-task"]').forEach(btn => {
+                btn.addEventListener('click', () => this._deleteTask(btn.dataset.id, list));
+            });
+        } catch {
+            list.innerHTML = '<p style="padding:.5rem">Network error.</p>';
+        }
+    }
+
+    async _loadTask(taskId, dialog) {
+        try {
+            const resp = await fetch(`/api/tasks/${taskId}`);
+            const data = await resp.json();
+            if (!resp.ok) return;
+            this.loadTaskData(data);
+            if (dialog) dialog.hide();
+        } catch { /* silent */ }
+    }
+
+    async _deleteTask(taskId, listEl) {
+        if (!await window.showConfirmModal('Delete this task?')) return;
+        try {
+            const resp = await fetch(`/api/tasks/${taskId}`, {method: 'DELETE'});
+            if (resp.ok) listEl.querySelector(`[data-action="delete-task"][data-id="${taskId}"]`)?.closest('.browse-item')?.remove();
+        } catch { /* silent */ }
     }
 }
 

@@ -1,182 +1,160 @@
-# GlidePlan
+﻿# GlidePlan
 
-A modern web-based application for editing and managing waypoint files in SeeYou CUP format, commonly used in soaring and gliding. This application has been converted from a desktop Tkinter application to a full web interface.
+**AI-Powered Gliding Task Planner & Waypoint Manager**
 
-## Features
+A comprehensive web application for glider pilots featuring AI-driven task planning, waypoint management, airspace validation, and weather integration. Built with Flask, PostgreSQL, and modern web technologies.
 
-### File Operations
-- **Open CUP/CSV files**: Upload and parse waypoint files
-- **Save as CUP/CSV**: Download waypoints in either format
-- **New file**: Start with an empty waypoint collection
+---
 
-### Waypoint Management
-- **Add waypoints**: Create new waypoints with full validation
-- **Edit waypoints**: Modify existing waypoint properties
-- **Delete waypoints**: Remove selected waypoints
-- **Batch operations**: Select multiple waypoints for bulk operations
+##  Features
 
-### Interactive Map
-- **Leaflet-based map**: View all waypoints on an interactive OpenStreetMap
-- **Click to add**: Add new waypoints by clicking on the map
-- **Popup details**: View waypoint information in map popups
-- **Auto-fit bounds**: Automatically zoom to show all waypoints
+###  AI Task Planner
 
-### Data Validation
-- **Coordinate validation**: Ensure latitude/longitude are within valid ranges
-- **Style codes**: Support for SeeYou waypoint style codes (0-21)
-- **Runway data**: Validate runway direction, length, and width formats
-- **Elevation fetching**: Automatically fetch elevation data from open-elevation API
+- **Intelligent Route Generation**: AI analyzes weather, airspace, and terrain to suggest optimal task routes
+- **Multi-criteria Optimization**: Considers thermal strength, wind conditions, airspace restrictions, and safety margins
+- **Weather Integration**: Open-Meteo (free), Windy API (CAPE, cloud cover, wind gusts, RH), IMGW-PIB (Polish data)
+- **Airspace Safety**: OpenAIP integration, per-route conflict detection, Poland border geofence with toggle, configurable class filtering
+- **Safety Profiles**: Conservative/Standard/Aggressive with triangle preferences and distance constraints
+- **Custom AI Instructions**: Personalize via `ai_planner_instructions.md`
+- **Export Formats**: CUP, LKT, TSK, XCTSK with QR codes
 
-### User Interface
-- **Responsive design**: Works on desktop, tablet, and mobile devices
-- **Sortable table**: Click column headers to sort waypoints
-- **Tab navigation**: Switch between list view and map view
-- **Real-time status**: Status bar shows current operation and waypoint count
+###  Waypoint & Task Management
 
-## Installation
+- Import/export CUP, CSV, LKT, TSK, XCTSK formats
+- Interactive Leaflet maps with click-to-add
+- Public/private libraries with share links
+- 22 XCSoar/SeeYou waypoint styles
+- QR code generation for mobile
 
-### Prerequisites
-- Python 3.7 or higher
-- pip (Python package installer)
+###  User Management & Safety
 
-### Setup
-1. **Clone or download** the project to your local machine
+- Secure authentication with bcrypt
+- Free/Premium/Admin tiers with usage tracking
+- Real-time airspace validation
+- Border geofencing (26-point Poland polygon)
+- Max distance constraints (60-75% of target)
 
-2. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+---
 
-3. **Run the application**:
-   ```bash
-   python app.py
-   ```
+##  Quick Start
 
-4. **Open your browser** and navigate to:
-   ```
-   http://localhost:5000
-   ```
+### Docker Deployment (Recommended)
 
-## Usage
-
-### Loading Waypoints
-1. Click **"Open File"** button
-2. Select a `.cup` or `.csv` file from your computer
-3. Waypoints will be loaded and displayed in both the table and map
-
-### Adding Waypoints
-1. Click **"Add Waypoint"** button, or
-2. Switch to **Map View** and click **"Add Waypoint on Map"**, then click on the map
-3. Fill in the waypoint details in the modal form
-4. Click **"Save Waypoint"**
-
-### Editing Waypoints
-1. Select a waypoint in the table (checkbox)
-2. Click **"Edit Selected"** button
-3. Modify the waypoint details
-4. Click **"Save Waypoint"**
-
-### Saving Waypoints
-1. Click **"Save CUP"** or **"Save CSV"** to download the file
-2. The file will be downloaded to your default downloads folder
-
-## File Formats
-
-### CUP Format
-The application supports the SeeYou CUP format with all standard fields:
-- Name (required)
-- Code (optional)
-- Country (optional)
-- Latitude/Longitude (required, decimal degrees)
-- Elevation (optional, with units)
-- Style (waypoint type, 0-21)
-- Runway direction, length, width (for airfields)
-- Radio frequency
-- Description
-
-### CSV Format
-Standard comma-separated values format with the same fields as CUP.
-
-## Technical Details
-
-### Backend (Flask)
-- **Flask web framework** with REST API endpoints
-- **Session-based storage** for waypoint data
-- **File upload/download** handling
-- **Elevation API integration** using open-elevation.com
-- **Data validation** using the existing Waypoint model
-
-### Frontend
-- **HTML5/CSS3/JavaScript** with modern ES6+ features
-- **Leaflet maps** for interactive mapping
-- **Responsive design** using CSS Grid and Flexbox
-- **Font Awesome icons** for a polished interface
-- **No external frameworks** - vanilla JavaScript for maximum compatibility
-
-### API Endpoints
-- `GET /api/waypoints` - Get all waypoints
-- `POST /api/waypoints` - Add new waypoint
-- `PUT /api/waypoints/<index>` - Update waypoint
-- `DELETE /api/waypoints/<index>` - Delete waypoint
-- `POST /api/upload` - Upload CUP/CSV file
-- `GET /api/download/<format>` - Download as CUP/CSV
-- `GET /api/elevation/<lat>/<lon>` - Fetch elevation data
-- `POST /api/clear` - Clear all waypoints
-
-## Project Structure
-
-```
-soaring_cup_web/
-├── app.py                          # Flask web application
-├── requirements.txt                # Python dependencies
-├── README.md                       # This file
-├── backend/                        # Original backend modules
-│   └── soaring_cup_file_editor/
-│       ├── models.py               # Waypoint data model
-│       ├── file_io.py              # CUP/CSV file operations
-│       ├── config.py               # Configuration constants
-│       └── utils.py                # Utility functions
-├── static/                         # Web assets
-│   ├── css/
-│   │   └── style.css               # Application styles
-│   └── js/
-│       └── app.js                  # JavaScript application
-├── templates/                      # HTML templates
-│   └── index.html                  # Main application page
-└── uploads/                        # Temporary file storage
+```bash
+git clone <repository-url>
+cd soaring_cup_web
+cp .env.example .env  # Edit with API keys and passwords
+docker-compose up -d
 ```
 
-## Migration from Desktop App
+Access at: **http://localhost:5000**
 
-This web application maintains full compatibility with the original desktop Tkinter application:
+Includes: Flask + Gunicorn, PostgreSQL 16, automatic migrations, persistent volumes
 
-- **Same data models**: Uses the existing `Waypoint` class and validation
-- **Same file I/O**: Reuses the existing CUP/CSV parsing and writing functions
-- **Same features**: All functionality from the desktop app is preserved
-- **Enhanced UI**: Improved user experience with modern web technologies
+### Local Development
 
-## Browser Compatibility
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+createdb gliding_forecast
+cp .env.example .env  # Edit DATABASE_URL
+python app.py
+```
 
-- **Modern browsers**: Chrome 60+, Firefox 60+, Safari 12+, Edge 79+
-- **Mobile browsers**: iOS Safari, Chrome Mobile, Samsung Internet
-- **Features used**: ES6 classes, async/await, CSS Grid, Flexbox
+---
 
-## Contributing
+##  Configuration
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+### Required API Keys (for full functionality)
 
-## License
+| Service | Purpose | Free Tier | Get Key |
+|---------|---------|-----------|---------|
+| **OpenRouter** | AI planning (GeminiLlamaDeepSeek) | Yes | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| **Windy** | Enhanced weather & thermals | 1,000/mo | [api.windy.com/keys](https://api.windy.com/keys) |
+| **OpenAIP** | European airspace | Yes | [openaip.net](https://www.openaip.net/) |
 
-This project maintains the same license as the original desktop application.
+See `.env.example` for all configuration options.
 
-## Support
+---
 
-For issues or questions:
-1. Check the browser console for JavaScript errors
-2. Check the Flask console for server errors
-3. Ensure all required Python packages are installed
-4. Verify your browser supports modern JavaScript features
+##  Usage
+
+### AI Task Planner
+
+1. Navigate to **AI Planner** tab
+2. Select takeoff airport, target distance, optional destination
+3. Choose safety profile (Conservative/Standard/Aggressive)
+4. Configure airspace constraints and border crossing toggle
+5. Click **Generate Routes**
+6. Export in CUP/LKT/TSK/XCTSK format
+
+### Customizing AI Behavior
+
+Edit `ai_planner_instructions.md`:
+
+```markdown
+# Custom AI Planner Instructions
+## Safety Priorities
+- Always prioritize routes within glide range
+## Route Preferences
+- Prefer 3-leg routes for conservative profile
+```
+
+---
+
+##  Architecture
+
+**Stack**: Flask 3.1, SQLAlchemy 2.0, PostgreSQL 16, Vanilla JS, Shoelace, Leaflet
+
+**AI**: OpenRouter (Gemini 2.0 Flash  Llama 3.3 70B  DeepSeek Chat)
+
+**Weather**: Open-Meteo + Windy API + IMGW-PIB
+
+**Airspace**: OpenAIP European database
+
+**Key Features**:
+- Modular architecture (routes/services/models separation)
+- Per-candidate airspace validation via callback pattern
+- 26-point Poland geofence with ray-casting
+- Session persistence for AI planner inputs
+- Usage tracking with tier-based quotas
+
+---
+
+##  Production Deployment
+
+### Deployment Checklist
+
+- [ ] Generate secure `SECRET_KEY` (64 hex chars)
+- [ ] Set strong `DB_PASSWORD`
+- [ ] Add API keys (OpenRouter, Windy, OpenAIP)
+- [ ] Configure SSL/TLS (Caddy/Nginx reverse proxy)
+- [ ] Set up PostgreSQL backups
+- [ ] Configure firewall (allow 80/443 only)
+
+### Logs
+
+`logs/glideplan.log` with rotation (10MB max, 10 backups)
+
+---
+
+##  Recent Updates
+
+-  OpenRouter integration with automatic fallback
+-  Enhanced Windy API (CAPE, cloud cover, wind gusts, RH)  
+-  Poland border geofence with override toggle
+-  Per-route airspace validation
+-  Docker Compose with PostgreSQL 16
+-  Cleaned up requirements.txt (removed obsolete google-generativeai, groq SDKs)
+-  Route type scoring (triangle preference for conservative/standard)
+-  Max distance from home constraints
+
+---
+
+##  Acknowledgments
+
+Open-Meteo  OpenAIP  Windy  OpenRouter  Leaflet  Shoelace
+
+---
+
+**Happy Flying! **

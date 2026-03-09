@@ -14,23 +14,64 @@ from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from flask import Flask, render_template, request, jsonify, send_file, session
 from flask_cors import CORS
+from flask_login import LoginManager
 from werkzeug.utils import secure_filename
 import requests
 import time as _time
 
-from backend.models import Waypoint
+# backend.config loads dotenv from .env at import time
+from backend.config import STYLE_OPTIONS, SECRET_KEY
+from backend.models.legacy import Waypoint
 from backend.file_io import (
     parse_cup_file, write_cup_file, parse_csv_file, write_csv_file, get_elevation,
     format_coordinate, write_task_cup, write_task_lkt, write_task_tsk, write_task_xctsk, parse_task_cup
 )
-from backend.config import STYLE_OPTIONS
+from backend.db import init_db
+from backend.services.auth_service import get_user_by_id
+from backend.routes.auth import auth_bp
+from backend.routes.waypoints import waypoints_bp
+from backend.routes.tasks import tasks_bp
+from backend.routes.browse import browse_bp
+from backend.routes.admin import admin_bp
+from backend.task_planner.routes import ai_planner_bp
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'glideplan_secret_key_change_in_production')
-if app.secret_key == 'glideplan_secret_key_change_in_production':
+app.secret_key = SECRET_KEY
+if app.secret_key in ('CHANGE-ME-IN-PRODUCTION', 'CHANGE-ME'):
     import warnings
-    warnings.warn('SECRET_KEY is set to the default insecure value. Set the SECRET_KEY environment variable in production.', stacklevel=1)
+    warnings.warn('SECRET_KEY is not set. Set SECRET_KEY environment variable in production.', stacklevel=1)
+
 CORS(app)
+
+# ── Flask-Login ──────────────────────────────────────────────────────────────
+login_manager = LoginManager(app)
+login_manager.session_protection = 'strong'
+
+
+@login_manager.user_loader
+def load_user(user_id: str):
+    try:
+        from backend.db import get_db
+        return get_user_by_id(get_db(), user_id)
+    except Exception:
+        return None
+
+
+@login_manager.unauthorized_handler
+def unauthorized():
+    return jsonify({'error': 'Authentication required.'}), 401
+
+
+# ── Blueprints ───────────────────────────────────────────────────────────────
+app.register_blueprint(auth_bp)
+app.register_blueprint(waypoints_bp)
+app.register_blueprint(tasks_bp)
+app.register_blueprint(browse_bp)
+app.register_blueprint(admin_bp)
+app.register_blueprint(ai_planner_bp)
+
+# ── Database ─────────────────────────────────────────────────────────────────
+init_db(app)
 
 # Configuration
 UPLOAD_FOLDER = 'uploads'
@@ -40,24 +81,40 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Configure logging
-if not app.debug:
-    # Create logs directory
-    os.makedirs('logs', exist_ok=True)
-    
-    # File handler with rotation
-    file_handler = RotatingFileHandler(
-        'logs/glideplan.log',
-        maxBytes=10485760,  # 10MB
-        backupCount=10
-    )
-    file_handler.setFormatter(logging.Formatter(
-        '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+os.makedirs('logs', exist_ok=True)
+
+# Always configure a file handler so backend module logs are captured
+file_handler = RotatingFileHandler(
+    'logs/glideplan.log',
+    maxBytes=10485760,  # 10MB
+    backupCount=10
+)
+_log_fmt = logging.Formatter(
+    '%(asctime)s %(levelname)s [%(name)s] %(message)s [%(pathname)s:%(lineno)d]'
+)
+file_handler.setFormatter(_log_fmt)
+
+# In debug mode: file at DEBUG, console at DEBUG for backend module
+# In production:  file at INFO
+if app.debug:
+    file_handler.setLevel(logging.DEBUG)
+    # Also add a console handler for the backend module so logs appear in terminal
+    _console = logging.StreamHandler()
+    _console.setFormatter(logging.Formatter(
+        '%(asctime)s %(levelname)s [%(name)s] %(message)s'
     ))
+    _console.setLevel(logging.DEBUG)
+    logging.getLogger('backend').addHandler(_console)
+    logging.getLogger('backend').setLevel(logging.DEBUG)
+else:
     file_handler.setLevel(logging.INFO)
-    app.logger.addHandler(file_handler)
-    
-    app.logger.setLevel(logging.INFO)
-    app.logger.info('GlidePlan startup')
+
+# Attach file handler to both Flask app logger and backend module logger
+app.logger.addHandler(file_handler)
+app.logger.setLevel(logging.DEBUG if app.debug else logging.INFO)
+logging.getLogger('backend').addHandler(file_handler)
+
+app.logger.info('GlidePlan startup (debug=%s)', app.debug)
 
 # Ensure directories exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -174,102 +231,6 @@ def health_check():
     
     return jsonify(health_status), 200
 
-
-@app.route('/api/waypoints', methods=['GET'])
-def get_waypoints():
-    """Get all waypoints."""
-    waypoints = get_session_waypoints()
-    return jsonify([wp.to_dict() for wp in waypoints])
-
-
-@app.route('/api/waypoints', methods=['POST'])
-def add_waypoint():
-    """Add a new waypoint."""
-    try:
-        data = request.get_json()
-        
-        # Auto-fetch elevation if not provided
-        if not data.get('elevation') and data.get('latitude') and data.get('longitude'):
-            try:
-                elevation = get_elevation(data['latitude'], data['longitude'])
-                if elevation and elevation > 0:  # Only use if valid elevation returned
-                    data['elevation'] = f"{elevation}m"
-                    app.logger.info(f"Auto-fetched elevation {elevation}m for waypoint at {data['latitude']}, {data['longitude']}")
-            except Exception as e:
-                app.logger.warning(f"Could not fetch elevation: {e}")
-                # Continue without elevation - don't fail the whole operation
-        
-        waypoint = Waypoint.from_dict(data)
-        
-        waypoints = get_session_waypoints()
-        waypoints.append(waypoint)
-        # Sort by name like desktop app
-        waypoints.sort(key=lambda w: w.name.lower())
-        set_session_waypoints(waypoints)
-        
-        app.logger.info(f"Added waypoint: {waypoint.name}")
-        return jsonify({'success': True, 'waypoint': waypoint.to_dict()})
-    except Exception as e:
-        import traceback
-        app.logger.error(f"Add waypoint error: {e}")
-        app.logger.error(traceback.format_exc())
-        return jsonify({'success': False, 'error': str(e)}), 400
-
-
-@app.route('/api/waypoints/<int:index>', methods=['PUT'])
-def update_waypoint(index):
-    """Update an existing waypoint."""
-    try:
-        data = request.get_json()
-        waypoints = get_session_waypoints()
-        
-        if 0 <= index < len(waypoints):
-            original_waypoint = waypoints[index]
-            
-            # Check if coordinates changed and auto-fetch elevation if needed
-            coords_changed = (original_waypoint.latitude != data.get('latitude') or 
-                            original_waypoint.longitude != data.get('longitude'))
-            
-            if (coords_changed or not data.get('elevation')) and data.get('latitude') and data.get('longitude'):
-                try:
-                    elevation = get_elevation(data['latitude'], data['longitude'])
-                    if elevation and elevation > 0:  # Only use if valid elevation returned
-                        data['elevation'] = f"{elevation}m"
-                        app.logger.info(f"Auto-fetched elevation {elevation}m for waypoint at {data['latitude']}, {data['longitude']}")
-                except Exception as e:
-                    app.logger.warning(f"Could not fetch elevation: {e}")
-                    # Continue without elevation - don't fail the whole operation
-            
-            waypoint = Waypoint.from_dict(data)
-            waypoints[index] = waypoint
-            # Sort by name like desktop app
-            waypoints.sort(key=lambda w: w.name.lower())
-            set_session_waypoints(waypoints)
-            
-            app.logger.info(f"Updated waypoint: {waypoint.name}")
-            return jsonify({'success': True, 'waypoint': waypoint.to_dict()})
-        else:
-            return jsonify({'success': False, 'error': 'Waypoint index out of range'}), 404
-    except Exception as e:
-        import traceback
-        app.logger.error(f"Update waypoint error: {e}")
-        app.logger.error(traceback.format_exc())
-        return jsonify({'success': False, 'error': str(e)}), 400
-
-
-@app.route('/api/waypoints/<int:index>', methods=['DELETE'])
-def delete_waypoint(index):
-    """Delete a waypoint."""
-    try:
-        waypoints = get_session_waypoints()
-        if 0 <= index < len(waypoints):
-            deleted_waypoint = waypoints.pop(index)
-            set_session_waypoints(waypoints)
-            return jsonify({'success': True, 'deleted': deleted_waypoint.to_dict()})
-        else:
-            return jsonify({'success': False, 'error': 'Waypoint index out of range'}), 404
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
 
 
 @app.route('/api/elevation/<float:lat>/<float:lon>', methods=['GET'])

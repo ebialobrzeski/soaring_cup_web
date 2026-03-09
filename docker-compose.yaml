@@ -1,23 +1,49 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:18
+    container_name: postgres
+    restart: always
+    networks:
+      - main-stack_net
+    env_file:
+      - .env
+    ports:
+      - "5434:5432"
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-glideplan}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   glideplan:
     build: .
     container_name: glideplan
-    restart: unless-stopped
+    restart: always
     ports:
       - "5000:5000"
     volumes:
-      # Persist uploaded files and session data
+      # Persist uploaded files, session data, and logs
       - ./data:/app/data
       - ./uploads:/app/uploads
       - ./logs:/app/logs
     environment:
       - FLASK_ENV=production
       - SECRET_KEY=${SECRET_KEY:-change_this_secret_key_in_production}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-glideplan}:${POSTGRES_PASSWORD:-changeme_secure_password}@postgres:5432/${POSTGRES_DB:-gliding_forecast}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - WINDY_API_KEY=${WINDY_API_KEY:-}
+      - OPENAIP_API_KEY=${OPENAIP_API_KEY:-}
+      - BASE_URL=${BASE_URL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
-      - glideplan-network
+      - main-stack_net
 
 networks:
-  glideplan-network:
+  main-stack_net:
     driver: bridge

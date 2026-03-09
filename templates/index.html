@@ -54,6 +54,21 @@
                 </div>
             </div>
             <div class="header-toolbar">
+                <!-- Auth controls -->
+                <div id="auth-logged-out" style="display:flex; align-items:center; gap:8px;">
+                    <sl-button id="auth-login-btn" variant="default" size="small">
+                        <i class="fas fa-sign-in-alt" slot="prefix"></i> Log in
+                    </sl-button>
+                    <sl-button id="auth-register-btn" variant="primary" size="small">
+                        <i class="fas fa-user-plus" slot="prefix"></i> Sign up
+                    </sl-button>
+                </div>
+                <div id="auth-logged-in" style="display:none; align-items:center; gap:8px;">
+                    <sl-badge id="auth-tier-badge" variant="neutral" pill>FREE</sl-badge>
+                    <span id="auth-user-name" style="font-size:0.85rem; color:var(--text-secondary);"></span>
+                    <sl-icon-button id="auth-logout-btn" name="box-arrow-right" label="Log out" title="Log out"></sl-icon-button>
+                </div>
+                <sl-divider vertical></sl-divider>
                 <sl-icon-button name="moon" id="theme-toggle" label="Toggle theme"></sl-icon-button>
                 <sl-divider vertical></sl-divider>
                 <sl-tooltip placement="bottom-end" hoist>
@@ -88,6 +103,8 @@
             <sl-tab slot="nav" panel="list"><i class="fas fa-list"></i> List View</sl-tab>
             {% endif %}
             <sl-tab slot="nav" panel="task"{% if view_mode %} active{% endif %}><i class="fas fa-route"></i> Task Planner</sl-tab>
+            <sl-tab slot="nav" panel="ai-planner"><i class="fas fa-brain"></i> AI Planner</sl-tab>
+            <sl-tab slot="nav" panel="admin" id="admin-tab" style="display:none"><i class="fas fa-shield-alt"></i> Admin</sl-tab>
 
             <!-- Map View -->
             <sl-tab-panel name="map">
@@ -103,6 +120,15 @@
                         <input type="file" id="file-upload" accept=".cup,.csv" style="display: none;">
                         <sl-button id="save-cup-btn" variant="success" disabled>
                             <i class="fas fa-save" slot="prefix"></i> Save CUP
+                        </sl-button>
+                        <sl-button id="save-to-account-btn" variant="success" data-auth-required style="display:none">
+                            <i class="fas fa-cloud-upload-alt" slot="prefix"></i> Save to Account
+                        </sl-button>
+                        <sl-button id="browse-waypoints-btn" variant="default" data-auth-required style="display:none">
+                            <i class="fas fa-search" slot="prefix"></i> Browse
+                        </sl-button>
+                        <sl-button id="my-files-btn" variant="default" data-auth-required style="display:none">
+                            <i class="fas fa-folder" slot="prefix"></i> My Files
                         </sl-button>
                     </sl-button-group>
                     <sl-divider vertical></sl-divider>
@@ -144,16 +170,25 @@
                                     <i class="fas fa-folder-open" slot="prefix"></i> Load Task
                                 </sl-button>
                                 <input type="file" id="task-file-input" accept=".cup" style="display:none">
+                                <sl-button id="browse-tasks-btn" variant="default" size="small" data-auth-required style="display:none">
+                                    <i class="fas fa-search" slot="prefix"></i> Browse Tasks
+                                </sl-button>
+                                <sl-button id="save-task-btn" variant="success" size="small" data-auth-required style="display:none">
+                                    <i class="fas fa-cloud-upload-alt" slot="prefix"></i> Save Task
+                                </sl-button>
+                                <sl-button id="my-tasks-btn" variant="default" size="small" data-auth-required style="display:none">
+                                    <i class="fas fa-list" slot="prefix"></i> My Tasks
+                                </sl-button>
                                 {% if not view_mode %}
-                                <sl-button id="airspace-open-btn" variant="default" size="small">
+                                <sl-button id="airspace-openaip-btn" variant="default" size="small" title="Fetch airspace from OpenAIP for current map view">
                                     <i class="fas fa-shield-alt" slot="prefix"></i> Airspace
+                                </sl-button>
+                                <sl-button id="airspace-open-btn" variant="default" size="small" title="Load airspace from local file">
+                                    <i class="fas fa-file-upload" slot="prefix"></i>
                                 </sl-button>
                                 <input type="file" id="airspace-file-input" accept=".txt,.openair,.air" style="display:none">
                                 <sl-button id="airspace-clear-btn" size="small" style="display:none" title="Remove airspace">
                                     <i class="fas fa-times"></i>
-                                </sl-button>
-                                <sl-button id="xcsoar-repo-btn" variant="default" size="small" title="Browse XCSoar data repository">
-                                    <i class="fas fa-database" slot="prefix"></i> Repository
                                 </sl-button>
                                 {% endif %}
                             </div>
@@ -357,6 +392,406 @@
                 </div>
                 {% endif %}
             </sl-tab-panel>
+            <!-- AI Planner Tab -->
+            <sl-tab-panel name="ai-planner">
+                <div class="ai-planner-panel">
+                    <div id="ai-planner-upgrade-cta" class="ai-upgrade-cta" hidden>
+                        <i class="fas fa-lock fa-3x" style="color:var(--sl-color-neutral-400); margin-bottom:16px;"></i>
+                        <h2>AI Planner &mdash; Premium Feature</h2>
+                        <p>Upgrade to premium to access intelligent task planning with weather analysis, glider polar integration, and AI-powered route optimization.</p>
+                        <sl-button variant="primary" size="medium" id="ai-upgrade-btn">
+                            <i class="fas fa-star" slot="prefix"></i> Upgrade to Premium
+                        </sl-button>
+                    </div>
+                    <div id="ai-planner-premium-content" class="ai-planner-content" hidden>
+                        <div class="aip-layout">
+                            <!-- Sidebar: input form -->
+                            <div class="aip-sidebar">
+                                <sl-card class="aip-form-card">
+                                    <div slot="header" class="card-header-with-icon">
+                                        <i class="fas fa-brain"></i> AI Task Planner
+                                        <sl-dropdown id="aip-session-dropdown" style="margin-left:auto;">
+                                            <sl-button slot="trigger" size="small" variant="text" title="Session history">
+                                                <i class="fas fa-history"></i>
+                                            </sl-button>
+                                            <sl-menu id="aip-session-menu">
+                                                <sl-menu-item disabled>No saved sessions</sl-menu-item>
+                                            </sl-menu>
+                                        </sl-dropdown>
+                                    </div>
+
+                                    <!-- Airports -->
+                                    <div class="aip-field-group">
+                                        <div class="aip-autocomplete-wrap">
+                                            <sl-input id="aip-takeoff" label="Takeoff airport" placeholder="Start typing airport name…" size="small" required autocomplete="off">
+                                                <i class="fas fa-plane-departure" slot="prefix"></i>
+                                            </sl-input>
+                                            <div class="aip-ac-list" id="aip-takeoff-ac"></div>
+                                        </div>
+                                        <div class="aip-autocomplete-wrap">
+                                            <sl-input id="aip-destination" label="Destination airport" placeholder="Same as takeoff for round trip" size="small" help-text="Leave blank for round trip" autocomplete="off">
+                                                <i class="fas fa-plane-arrival" slot="prefix"></i>
+                                            </sl-input>
+                                            <div class="aip-ac-list" id="aip-destination-ac"></div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Distance & Duration -->
+                                    <div class="aip-field-row">
+                                        <sl-input id="aip-distance" label="Target distance (km)" type="number" size="small" min="30" max="1200" value="150" required no-spin-buttons>
+                                            <i class="fas fa-route" slot="prefix"></i>
+                                        </sl-input>
+                                        <sl-input id="aip-max-duration" label="Max duration (h)" type="number" size="small" min="1" max="12" value="4" step="0.5" no-spin-buttons>
+                                            <i class="fas fa-hourglass-half" slot="prefix"></i>
+                                        </sl-input>
+                                    </div>
+
+                                    <!-- Date & Time -->
+                                    <div class="aip-field-row">
+                                        <sl-input id="aip-flight-date" label="Flight date" type="date" size="small" required>
+                                            <i class="fas fa-calendar-day" slot="prefix"></i>
+                                        </sl-input>
+                                        <sl-input id="aip-takeoff-time" label="Takeoff time (UTC)" type="time" size="small" help-text="Optional — AI suggests if blank">
+                                            <i class="fas fa-clock" slot="prefix"></i>
+                                        </sl-input>
+                                    </div>
+
+                                    <!-- Glider -->
+                                    <div class="aip-autocomplete-wrap">
+                                        <sl-input id="aip-glider" label="Glider" placeholder="Type to search gliders…" size="small" clearable autocomplete="off">
+                                            <i class="fas fa-paper-plane" slot="prefix"></i>
+                                        </sl-input>
+                                        <div class="aip-ac-list" id="aip-glider-ac"></div>
+                                        <input type="hidden" id="aip-glider-id" value="">
+                                    </div>
+
+                                    <!-- Soaring Mode -->
+                                    <sl-radio-group id="aip-soaring-mode" label="Soaring mode" value="thermal" fieldset>
+                                        <sl-radio-button value="thermal" size="small"><i class="fas fa-sun"></i>&nbsp; Thermal</sl-radio-button>
+                                        <sl-radio-button value="ridge" size="small"><i class="fas fa-mountain"></i>&nbsp; Ridge</sl-radio-button>
+                                        <sl-radio-button value="wave" size="small"><i class="fas fa-water"></i>&nbsp; Wave</sl-radio-button>
+                                    </sl-radio-group>
+
+                                    <!-- Safety Profile -->
+                                    <sl-radio-group id="aip-safety" label="Safety profile" value="standard" fieldset>
+                                        <sl-radio-button value="conservative" size="small"><i class="fas fa-shield-alt"></i>&nbsp; Conservative</sl-radio-button>
+                                        <sl-radio-button value="standard" size="small"><i class="fas fa-balance-scale"></i>&nbsp; Standard</sl-radio-button>
+                                        <sl-radio-button value="aggressive" size="small"><i class="fas fa-bolt"></i>&nbsp; Aggressive</sl-radio-button>
+                                    </sl-radio-group>
+
+                                    <!-- Airspace Constraints (collapsible) -->
+                                    <sl-details summary="Airspace constraints" class="aip-constraints">
+                                        <div class="aip-constraints-grid">
+                                            <sl-switch id="aip-exclude-transponder" size="small">Exclude transponder zones</sl-switch>
+                                            <sl-switch id="aip-exclude-flightplan" size="small">Exclude flight-plan zones</sl-switch>
+                                            <sl-switch id="aip-exclude-restricted" size="small" checked>Exclude restricted zones</sl-switch>
+                                            <sl-switch id="aip-exclude-danger" size="small" checked>Exclude danger zones</sl-switch>
+                                            <sl-switch id="aip-exclude-prohibited" size="small" checked disabled>Exclude prohibited zones</sl-switch>
+                                            <sl-switch id="aip-allow-border-crossing" size="small">Allow crossing country borders</sl-switch>
+                                            <div class="aip-class-toggles">
+                                                <label style="font-size:0.85rem; color:var(--text-secondary);">Exclude classes:</label>
+                                                <sl-checkbox id="aip-exclude-C" size="small">C</sl-checkbox>
+                                                <sl-checkbox id="aip-exclude-D" size="small">D</sl-checkbox>
+                                                <sl-checkbox id="aip-exclude-E" size="small">E</sl-checkbox>
+                                            </div>
+                                        </div>
+                                    </sl-details>
+
+                                    <!-- Generate Button -->
+                                    <sl-button id="aip-generate-btn" variant="primary" size="medium" style="width:100%; margin-top:8px;">
+                                        <i class="fas fa-magic" slot="prefix"></i> Generate Task
+                                    </sl-button>
+                                </sl-card>
+                            </div>
+
+                            <!-- Main area: results -->
+                            <div class="aip-main">
+                                <!-- Status / loading -->
+                                <div id="aip-status" class="aip-status">
+                                    <div class="aip-empty-state">
+                                        <i class="fas fa-brain fa-3x" style="color:var(--sl-color-primary-400); margin-bottom:16px;"></i>
+                                        <h3>Configure your flight and click Generate</h3>
+                                        <p>The AI will analyze weather, airspace, and terrain to propose an optimal soaring task.</p>
+                                    </div>
+                                </div>
+
+                                <!-- Loading spinner (hidden) -->
+                                <div id="aip-loading" class="aip-loading" hidden>
+                                    <sl-spinner style="font-size:2rem;"></sl-spinner>
+                                    <p>Analyzing weather, airspace &amp; terrain...</p>
+                                </div>
+
+                                <!-- Result card (hidden) -->
+                                <div id="aip-result" class="aip-result" hidden>
+                                    <sl-card class="aip-result-card">
+                                        <div slot="header" class="card-header-with-icon">
+                                            <i class="fas fa-flag-checkered"></i> <span id="aip-result-title">Task Proposal</span>
+                                        </div>
+
+                                        <!-- Summary row -->
+                                        <div class="aip-result-summary">
+                                            <div class="aip-stat">
+                                                <i class="fas fa-star"></i>
+                                                <div><label>Score</label><strong id="aip-result-score">—</strong></div>
+                                            </div>
+                                            <div class="aip-stat">
+                                                <i class="fas fa-route"></i>
+                                                <div><label>Distance</label><strong id="aip-result-distance">—</strong></div>
+                                            </div>
+                                            <div class="aip-stat">
+                                                <i class="fas fa-clock"></i>
+                                                <div><label>Est. time</label><strong id="aip-result-time">—</strong></div>
+                                            </div>
+                                            <div class="aip-stat">
+                                                <i class="fas fa-tachometer-alt"></i>
+                                                <div><label>Avg speed</label><strong id="aip-result-speed">—</strong></div>
+                                            </div>
+                                            <div class="aip-stat">
+                                                <i class="fas fa-shield-alt"></i>
+                                                <div><label>Airspace</label><strong id="aip-result-airspace">—</strong></div>
+                                            </div>
+                                            <div class="aip-stat">
+                                                <i class="fas fa-plane-departure"></i>
+                                                <div><label>Takeoff</label><strong id="aip-result-takeoff-time">—</strong></div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Leg details -->
+                                        <div id="aip-legs-table" class="aip-legs-table"></div>
+
+                                        <!-- Terrain info -->
+                                        <div id="aip-terrain" class="aip-terrain"></div>
+
+                                        <!-- Airspace conflicts -->
+                                        <div id="aip-conflicts" class="aip-conflicts"></div>
+
+                                        <!-- AI narrative -->
+                                        <div id="aip-narrative" class="aip-narrative"></div>
+
+                                        <!-- Alternative routes -->
+                                        <div id="aip-alternatives" class="aip-alternatives"></div>
+
+                                        <!-- Actions -->
+                                        <div class="aip-result-actions">
+                                            <sl-button id="aip-load-editor-btn" variant="success" size="small">
+                                                <i class="fas fa-file-import" slot="prefix"></i> Load into Editor
+                                            </sl-button>
+                                            <sl-button id="aip-regenerate-btn" variant="default" size="small">
+                                                <i class="fas fa-redo" slot="prefix"></i> Regenerate
+                                            </sl-button>
+                                        </div>
+                                    </sl-card>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="ai-planner-anon-cta" class="ai-upgrade-cta">
+                        <i class="fas fa-brain fa-3x" style="color:var(--sl-color-primary-500); margin-bottom:16px;"></i>
+                        <h2>AI Planner &mdash; Premium Feature</h2>
+                        <p>Log in or sign up for a premium account to access intelligent task planning with weather analysis, glider polar integration, and AI-powered route optimization.</p>
+                        <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
+                            <sl-button variant="primary" id="ai-login-btn">
+                                <i class="fas fa-sign-in-alt" slot="prefix"></i> Log in
+                            </sl-button>
+                            <sl-button variant="default" id="ai-signup-btn">
+                                <i class="fas fa-user-plus" slot="prefix"></i> Sign up
+                            </sl-button>
+                        </div>
+                    </div>
+                </div>
+            </sl-tab-panel>
+
+            <!-- Admin Panel -->
+            <sl-tab-panel name="admin">
+                <div class="admin-panel">
+                    <div class="admin-header">
+                        <h2><i class="fas fa-shield-alt"></i> Admin Panel</h2>
+                    </div>
+
+                    <!-- Sub-tabs: Users / Content / Usage -->
+                    <sl-tab-group id="admin-tabs">
+                        <sl-tab slot="nav" panel="admin-users"><i class="fas fa-users"></i> Users</sl-tab>
+                        <sl-tab slot="nav" panel="admin-content"><i class="fas fa-database"></i> User Content</sl-tab>
+                        <sl-tab slot="nav" panel="admin-usage"><i class="fas fa-chart-bar"></i> AI Usage</sl-tab>
+
+                        <!-- Users sub-panel -->
+                        <sl-tab-panel name="admin-users">
+                            <div class="admin-toolbar">
+                                <sl-input id="admin-user-search" placeholder="Search by email or name…" size="small" clearable style="flex:1; min-width:180px;">
+                                    <i class="fas fa-search" slot="prefix"></i>
+                                </sl-input>
+                                <sl-select id="admin-tier-filter" placeholder="All tiers" size="small" style="min-width:130px;" clearable>
+                                    <sl-option value="free">Free</sl-option>
+                                    <sl-option value="premium">Premium</sl-option>
+                                    <sl-option value="admin">Admin</sl-option>
+                                </sl-select>
+                                <sl-button size="small" id="admin-user-refresh-btn" variant="default">
+                                    <i class="fas fa-sync-alt" slot="prefix"></i> Refresh
+                                </sl-button>
+                            </div>
+                            <div id="admin-users-loading" style="display:none; text-align:center; padding:20px;">
+                                <sl-spinner></sl-spinner>
+                            </div>
+                            <div id="admin-users-error" class="admin-error" style="display:none;"></div>
+                            <div id="admin-users-table-wrap" class="admin-table-wrap">
+                                <table class="admin-table" id="admin-users-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Email</th>
+                                            <th>Display Name</th>
+                                            <th>Tier</th>
+                                            <th>Active</th>
+                                            <th>Files</th>
+                                            <th>Tasks</th>
+                                            <th>Registered</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="admin-users-tbody"></tbody>
+                                </table>
+                            </div>
+                            <div id="admin-users-pagination" class="browse-pagination" style="display:flex; gap:8px; align-items:center; justify-content:center; margin-top:12px;"></div>
+                        </sl-tab-panel>
+
+                        <!-- Content sub-panel -->
+                        <sl-tab-panel name="admin-content">
+                            <div class="admin-content-lookup">
+                                <p style="color:var(--text-secondary); margin-bottom:12px;">Select a user from the Users tab to view their content here.</p>
+                                <div id="admin-content-user-info" style="display:none;">
+                                    <div class="admin-content-user-header">
+                                        <span id="admin-content-user-name"></span>
+                                        <sl-button size="small" id="admin-content-back-btn" variant="neutral">
+                                            <i class="fas fa-arrow-left" slot="prefix"></i> Back to users
+                                        </sl-button>
+                                    </div>
+                                    <sl-tab-group id="admin-content-tabs">
+                                        <sl-tab slot="nav" panel="admin-files"><i class="fas fa-file-alt"></i> Waypoint Files (<span id="admin-content-file-count">0</span>)</sl-tab>
+                                        <sl-tab slot="nav" panel="admin-tasks"><i class="fas fa-route"></i> Tasks (<span id="admin-content-task-count">0</span>)</sl-tab>
+                                        <sl-tab-panel name="admin-files">
+                                            <div id="admin-files-list" class="admin-content-list"></div>
+                                        </sl-tab-panel>
+                                        <sl-tab-panel name="admin-tasks">
+                                            <div id="admin-tasks-list" class="admin-content-list"></div>
+                                        </sl-tab-panel>
+                                    </sl-tab-group>
+                                </div>
+                            </div>
+                        </sl-tab-panel>
+
+                        <!-- Usage sub-panel -->
+                        <sl-tab-panel name="admin-usage">
+                            <div class="admin-toolbar">
+                                <sl-select id="usage-period-select" value="30" size="small" style="min-width:160px;">
+                                    <sl-option value="7">Last 7 days</sl-option>
+                                    <sl-option value="14">Last 14 days</sl-option>
+                                    <sl-option value="30">Last 30 days</sl-option>
+                                    <sl-option value="90">Last 90 days</sl-option>
+                                </sl-select>
+                                <sl-button size="small" id="usage-refresh-btn" variant="default">
+                                    <i class="fas fa-sync-alt" slot="prefix"></i> Refresh
+                                </sl-button>
+                            </div>
+
+                            <div id="usage-loading" style="display:none; text-align:center; padding:20px;">
+                                <sl-spinner></sl-spinner>
+                            </div>
+                            <div id="usage-error" class="admin-error" style="display:none;"></div>
+
+                            <!-- Summary cards -->
+                            <div id="usage-summary-cards" class="usage-cards" style="display:none;">
+                                <div class="usage-card">
+                                    <div class="usage-card-label">Total Calls</div>
+                                    <div class="usage-card-value" id="usage-total-calls">0</div>
+                                </div>
+                                <div class="usage-card">
+                                    <div class="usage-card-label">Endpoints</div>
+                                    <div class="usage-card-value" id="usage-endpoint-count">0</div>
+                                </div>
+                                <div class="usage-card">
+                                    <div class="usage-card-label">Errors</div>
+                                    <div class="usage-card-value usage-card-errors" id="usage-total-errors">0</div>
+                                </div>
+                                <div class="usage-card">
+                                    <div class="usage-card-label">Unique Users</div>
+                                    <div class="usage-card-value" id="usage-unique-users">0</div>
+                                </div>
+                            </div>
+
+                            <!-- Endpoint breakdown -->
+                            <div id="usage-endpoint-section" style="display:none;">
+                                <h4 style="margin:16px 0 8px;">By Endpoint</h4>
+                                <div class="admin-table-wrap">
+                                    <table class="admin-table" id="usage-endpoint-table">
+                                        <thead>
+                                            <tr><th>Endpoint</th><th>Calls</th><th>Avg Time (ms)</th><th>Errors</th></tr>
+                                        </thead>
+                                        <tbody id="usage-endpoint-tbody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Daily breakdown -->
+                            <div id="usage-daily-section" style="display:none;">
+                                <h4 style="margin:16px 0 8px;">Daily Activity</h4>
+                                <div id="usage-daily-chart" class="usage-daily-chart"></div>
+                            </div>
+
+                            <!-- External APIs -->
+                            <div id="usage-external-section" style="display:none;">
+                                <h4 style="margin:16px 0 8px;">External API Calls</h4>
+                                <div class="admin-table-wrap">
+                                    <table class="admin-table" id="usage-external-table">
+                                        <thead>
+                                            <tr><th>Service</th><th>Requests</th><th>API Calls</th><th>OK</th><th>Errors</th><th>Avg Time (ms)</th></tr>
+                                        </thead>
+                                        <tbody id="usage-external-tbody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Top users -->
+                            <div id="usage-topusers-section" style="display:none;">
+                                <h4 style="margin:16px 0 8px;">Top Users</h4>
+                                <div class="admin-table-wrap">
+                                    <table class="admin-table" id="usage-topusers-table">
+                                        <thead>
+                                            <tr><th>Email</th><th>Calls</th></tr>
+                                        </thead>
+                                        <tbody id="usage-topusers-tbody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Recent errors -->
+                            <div id="usage-errors-section" style="display:none;">
+                                <h4 style="margin:16px 0 8px;">Recent Errors</h4>
+                                <div class="admin-table-wrap">
+                                    <table class="admin-table" id="usage-errors-table">
+                                        <thead>
+                                            <tr><th>Time</th><th>Endpoint</th><th>Status</th><th>Error</th></tr>
+                                        </thead>
+                                        <tbody id="usage-errors-tbody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Usage log -->
+                            <div id="usage-log-section" style="display:none;">
+                                <h4 style="margin:16px 0 8px;">Request Log</h4>
+                                <div class="admin-table-wrap">
+                                    <table class="admin-table" id="usage-log-table">
+                                        <thead>
+                                            <tr><th>Time</th><th>User</th><th>Endpoint</th><th>Status</th><th>Time (ms)</th></tr>
+                                        </thead>
+                                        <tbody id="usage-log-tbody"></tbody>
+                                    </table>
+                                </div>
+                                <div id="usage-log-pagination" class="browse-pagination" style="display:flex; gap:8px; align-items:center; justify-content:center; margin-top:12px;"></div>
+                            </div>
+                        </sl-tab-panel>
+                    </sl-tab-group>
+                </div>
+            </sl-tab-panel>
         </sl-tab-group>
     </div>
 
@@ -377,6 +812,160 @@
             </div>
         </div>
     </footer>
+
+    <!-- Login Dialog -->
+    <sl-dialog id="login-dialog" label="Log in to GlidePlan" style="--width: 420px;">
+        <form id="login-form" autocomplete="on">
+            <div class="form-group" style="margin-bottom:16px;">
+                <label for="login-email">Email</label>
+                <sl-input id="login-email" name="email" type="email" autocomplete="email" required placeholder="you@example.com" size="medium">
+                    <i class="fas fa-envelope" slot="prefix"></i>
+                </sl-input>
+            </div>
+            <div class="form-group" style="margin-bottom:16px;">
+                <label for="login-password">Password</label>
+                <sl-input id="login-password" name="password" type="password" autocomplete="current-password" required placeholder="Password" size="medium">
+                    <i class="fas fa-lock" slot="prefix"></i>
+                </sl-input>
+            </div>
+            <div id="login-error" class="auth-error" style="display:none; color:var(--sl-color-danger-600); margin-bottom:12px;"></div>
+            <sl-button id="login-submit-btn" type="submit" variant="primary" style="width:100%;">
+                <i class="fas fa-sign-in-alt" slot="prefix"></i> Log in
+            </sl-button>
+        </form>
+        <p style="margin-top:16px; text-align:center; font-size:0.85rem; color:var(--text-secondary);">
+            Don't have an account? <a href="#" id="switch-to-register">Sign up</a>
+        </p>
+    </sl-dialog>
+
+    <!-- Register Dialog -->
+    <sl-dialog id="register-dialog" label="Create Account" style="--width: 460px;">
+        <form id="register-form" autocomplete="on">
+            <div class="form-group" style="margin-bottom:14px;">
+                <label for="register-email">Email</label>
+                <sl-input id="register-email" name="email" type="email" autocomplete="email" required placeholder="you@example.com" size="medium">
+                    <i class="fas fa-envelope" slot="prefix"></i>
+                </sl-input>
+            </div>
+            <div class="form-group" style="margin-bottom:14px;">
+                <label for="register-display-name">Display Name</label>
+                <sl-input id="register-display-name" name="display_name" type="text" autocomplete="name" required placeholder="Jan Kowalski" size="medium">
+                    <i class="fas fa-user" slot="prefix"></i>
+                </sl-input>
+            </div>
+            <div class="form-group" style="margin-bottom:14px;">
+                <label for="register-password">Password <small style="color:var(--text-secondary);">(min 8 chars)</small></label>
+                <sl-input id="register-password" name="password" type="password" autocomplete="new-password" required placeholder="Password (min 8 chars)" size="medium">
+                    <i class="fas fa-lock" slot="prefix"></i>
+                </sl-input>
+            </div>
+            <div class="form-group" style="margin-bottom:16px;">
+                <label for="register-confirm-password">Confirm Password</label>
+                <sl-input id="register-confirm-password" name="confirm_password" type="password" autocomplete="new-password" required placeholder="Repeat password" size="medium">
+                    <i class="fas fa-lock" slot="prefix"></i>
+                </sl-input>
+            </div>
+            <div id="register-error" class="auth-error" style="display:none; color:var(--sl-color-danger-600); margin-bottom:12px;"></div>
+            <sl-button id="register-submit-btn" type="submit" variant="primary" style="width:100%;">
+                <i class="fas fa-user-plus" slot="prefix"></i> Create Account
+            </sl-button>
+        </form>
+        <p style="margin-top:16px; text-align:center; font-size:0.85rem; color:var(--text-secondary);">
+            Already have an account? <a href="#" id="switch-to-login">Log in</a>
+        </p>
+    </sl-dialog>
+
+    <!-- Save Waypoints to Account Dialog -->
+    <sl-dialog id="save-waypoints-dialog" label="Save Waypoints to Account" style="--width: 460px;">
+        <div class="form-group" style="margin-bottom:14px;">
+            <label for="save-wf-name">File Name</label>
+            <sl-input id="save-wf-name" placeholder="My Waypoints" size="medium">
+                <i class="fas fa-tag" slot="prefix"></i>
+            </sl-input>
+        </div>
+        <div class="form-group" style="margin-bottom:14px;">
+            <label for="save-wf-desc">Description <small style="color:var(--text-secondary);">(optional)</small></label>
+            <sl-input id="save-wf-desc" placeholder="Short description" size="medium">
+                <i class="fas fa-info-circle" slot="prefix"></i>
+            </sl-input>
+        </div>
+        <div class="form-group" style="margin-bottom:16px;" id="save-wf-visibility-row">
+            <sl-switch id="save-wf-public" checked>Make public (visible to everyone)</sl-switch>
+            <small id="save-wf-visibility-note" style="color:var(--text-secondary); display:none;">Free accounts can only save public files.</small>
+        </div>
+        <div id="save-wf-error" style="display:none; color:var(--sl-color-danger-600); margin-bottom:12px;"></div>
+        <div slot="footer" style="display:flex; gap:8px; justify-content:flex-end;">
+            <sl-button variant="neutral" id="save-wf-cancel">Cancel</sl-button>
+            <sl-button variant="primary" id="save-wf-submit"><i class="fas fa-save" slot="prefix"></i> Save</sl-button>
+        </div>
+    </sl-dialog>
+
+    <!-- My Waypoint Files Dialog -->
+    <sl-dialog id="my-files-dialog" label="My Waypoint Files" style="--width: 600px;">
+        <div id="my-files-list" style="min-height:120px;"></div>
+    </sl-dialog>
+
+    <!-- Save Task to Account Dialog -->
+    <sl-dialog id="save-task-dialog" label="Save Task to Account" style="--width: 460px;">
+        <div class="form-group" style="margin-bottom:14px;">
+            <label for="save-task-name">Task Name</label>
+            <sl-input id="save-task-name" placeholder="Task 1" size="medium">
+                <i class="fas fa-tag" slot="prefix"></i>
+            </sl-input>
+        </div>
+        <div class="form-group" style="margin-bottom:14px;">
+            <label for="save-task-desc">Description <small style="color:var(--text-secondary);">(optional)</small></label>
+            <sl-input id="save-task-desc" placeholder="Short description" size="medium">
+                <i class="fas fa-info-circle" slot="prefix"></i>
+            </sl-input>
+        </div>
+        <div class="form-group" style="margin-bottom:16px;">
+            <sl-switch id="save-task-public" checked>Make public (visible to everyone)</sl-switch>
+            <small id="save-task-visibility-note" style="color:var(--text-secondary); display:none;">Free accounts can only save public tasks.</small>
+        </div>
+        <div id="save-task-error" style="display:none; color:var(--sl-color-danger-600); margin-bottom:12px;"></div>
+        <div slot="footer" style="display:flex; gap:8px; justify-content:flex-end;">
+            <sl-button variant="neutral" id="save-task-cancel">Cancel</sl-button>
+            <sl-button variant="primary" id="save-task-submit"><i class="fas fa-save" slot="prefix"></i> Save</sl-button>
+        </div>
+    </sl-dialog>
+
+    <!-- My Tasks Dialog -->
+    <sl-dialog id="my-tasks-dialog" label="My Saved Tasks" style="--width: 600px;">
+        <div id="my-tasks-list" style="min-height:120px;"></div>
+    </sl-dialog>
+
+    <!-- Browse Waypoints Dialog -->
+    <sl-dialog id="browse-waypoints-dialog" label="Browse Waypoint Files" style="--width: 640px;">
+        <div style="display:flex; gap:8px; margin-bottom:12px; align-items:center; flex-wrap:wrap;">
+            <sl-input id="browse-waypoints-dialog-search" placeholder="Search by name, country, owner…" size="small" clearable style="flex:1; min-width:200px;">
+                <i class="fas fa-search" slot="prefix"></i>
+            </sl-input>
+            <sl-switch id="browse-waypoints-dialog-mine" size="small" data-auth-required style="display:none;">Mine only</sl-switch>
+        </div>
+        <div id="browse-waypoints-dialog-loading" style="display:none; text-align:center; padding:16px;">
+            <i class="fas fa-spinner fa-spin"></i> Loading…
+        </div>
+        <div id="browse-waypoints-dialog-error" class="auth-error" style="display:none; color:var(--sl-color-danger-600); margin-bottom:8px;"></div>
+        <div id="browse-waypoints-dialog-results" class="browse-results-list"></div>
+        <div id="browse-waypoints-dialog-pagination" class="browse-pagination" style="display:flex; gap:8px; align-items:center; justify-content:center; margin-top:12px;"></div>
+    </sl-dialog>
+
+    <!-- Browse Tasks Dialog -->
+    <sl-dialog id="browse-tasks-dialog" label="Browse Tasks" style="--width: 640px;">
+        <div style="display:flex; gap:8px; margin-bottom:12px; align-items:center; flex-wrap:wrap;">
+            <sl-input id="browse-tasks-dialog-search" placeholder="Search by name or owner…" size="small" clearable style="flex:1; min-width:200px;">
+                <i class="fas fa-search" slot="prefix"></i>
+            </sl-input>
+            <sl-switch id="browse-tasks-dialog-mine" size="small" data-auth-required style="display:none;">Mine only</sl-switch>
+        </div>
+        <div id="browse-tasks-dialog-loading" style="display:none; text-align:center; padding:16px;">
+            <i class="fas fa-spinner fa-spin"></i> Loading…
+        </div>
+        <div id="browse-tasks-dialog-error" class="auth-error" style="display:none; color:var(--sl-color-danger-600); margin-bottom:8px;"></div>
+        <div id="browse-tasks-dialog-results" class="browse-results-list"></div>
+        <div id="browse-tasks-dialog-pagination" class="browse-pagination" style="display:flex; gap:8px; align-items:center; justify-content:center; margin-top:12px;"></div>
+    </sl-dialog>
 
     <!-- Waypoint Edit Dialog -->
     <sl-dialog id="waypoint-modal" label="Add Waypoint" style="--width: 700px;">
@@ -737,5 +1326,9 @@
     <script src="{{ url_for('static', filename='js/icon-mapping.js') }}"></script>
     <script src="{{ url_for('static', filename='js/task-planner.js') }}"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/browse-dialog.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/ai-planner.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
 </body>
 </html>

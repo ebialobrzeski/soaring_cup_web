@@ -43,6 +43,9 @@ class SoaringCupEditor {
             window.taskPlanner.setup();
         }
 
+        // Initialise AI planner panel visibility based on auth state
+        this._updateAiPlannerPanel();
+
         // View mode: task tab is already active via the `active` attribute in HTML
         // — do NOT call switchTab('task') as it causes Shoelace to briefly hide/re-show
         //   the panel, which makes Leaflet lose its container dimensions (blank map).
@@ -63,6 +66,11 @@ class SoaringCupEditor {
             document.getElementById('open-file-btn').addEventListener('click', () => document.getElementById('file-upload').click());
             document.getElementById('new-btn').addEventListener('click', () => this.newFile());
             document.getElementById('save-cup-btn').addEventListener('click', () => this.downloadFile('cup'));
+
+            // Account save/browse
+            document.getElementById('save-to-account-btn')?.addEventListener('click', () => this.showSaveWaypointsDialog());
+            document.getElementById('my-files-btn')?.addEventListener('click', () => this.showMyFilesDialog());
+            document.getElementById('browse-waypoints-btn')?.addEventListener('click', () => window.waypointBrowser?.open());
         }
 
         // Tab navigation (Shoelace tab group)
@@ -73,6 +81,9 @@ class SoaringCupEditor {
             }
             if (panel === 'task' && window.taskPlanner) {
                 setTimeout(() => window.taskPlanner.initMap(), 100);
+            }
+            if (panel === 'ai-planner') {
+                this._updateAiPlannerPanel();
             }
         });
 
@@ -103,7 +114,24 @@ class SoaringCupEditor {
             document.getElementById('waypoint-form').addEventListener('submit', (e) => this.handleWaypointSubmit(e));
             document.getElementById('fetch-elevation-btn').addEventListener('click', () => this.fetchElevation());
             document.getElementById('paste-coords-btn').addEventListener('click', () => this.pasteCoordinates());
+
+            // Save waypoints dialog
+            document.getElementById('save-wf-cancel')?.addEventListener('click', () => document.getElementById('save-waypoints-dialog').hide());
+            document.getElementById('save-wf-submit')?.addEventListener('click', () => this.handleSaveWaypointsSubmit());
+
+            // My files dialog
+            // (populated on open)
+
+            // AI Planner CTA buttons
+            document.getElementById('ai-login-btn')?.addEventListener('click', () => window.authManager?.showLoginDialog());
+            document.getElementById('ai-signup-btn')?.addEventListener('click', () => window.authManager?.showRegisterDialog());
+            document.getElementById('ai-upgrade-btn')?.addEventListener('click', () => window.authManager?.showLoginDialog());
         }
+
+        // React to auth state changes
+        document.addEventListener('auth-changed', () => {
+            this._updateAiPlannerPanel();
+        });
     }
 
     setupThemeToggle() {
@@ -1089,6 +1117,124 @@ class SoaringCupEditor {
         if (overlay) {
             overlay.style.display = 'none';
         }
+    }
+
+    // ── AI Planner panel ─────────────────────────────────────────────────────
+    _updateAiPlannerPanel() {
+        const anon    = document.getElementById('ai-planner-anon-cta');
+        const upgrade = document.getElementById('ai-planner-upgrade-cta');
+        const content = document.getElementById('ai-planner-premium-content');
+        if (!anon || !upgrade || !content) return;
+
+        const am = window.authManager;
+        if (!am || !am.isAuthenticated) {
+            anon.hidden = false; upgrade.hidden = true; content.hidden = true;
+        } else if (!am.isPremium()) {
+            anon.hidden = true; upgrade.hidden = false; content.hidden = true;
+        } else {
+            anon.hidden = true; upgrade.hidden = true; content.hidden = false;
+            if (window.aiPlanner) window.aiPlanner.init();
+        }
+    }
+
+    // ── Save waypoints to account ─────────────────────────────────────────────
+    showSaveWaypointsDialog() {
+        const dialog = document.getElementById('save-waypoints-dialog');
+        if (!dialog) return;
+        const nameEl = document.getElementById('save-wf-name');
+        if (nameEl) nameEl.value = this.currentFileName || '';
+        // Premium gate: visibility switch
+        const visRow = document.getElementById('save-wf-visibility-row');
+        if (visRow) visRow.hidden = !(window.authManager?.isPremium());
+        const wfErrEl = document.getElementById('save-wf-error');
+        if (wfErrEl) { wfErrEl.textContent = ''; wfErrEl.style.display = 'none'; }
+        dialog.show();
+    }
+
+    async handleSaveWaypointsSubmit() {
+        const name = document.getElementById('save-wf-name')?.value?.trim();
+        const errorEl = document.getElementById('save-wf-error');
+        const showError = (msg) => { errorEl.textContent = msg; errorEl.style.display = msg ? '' : 'none'; };
+        if (!name) { showError('Name is required.'); return; }
+        const desc = document.getElementById('save-wf-desc')?.value?.trim() || '';
+        const isPublic = document.getElementById('save-wf-public')?.checked ?? true;
+
+        // Build entries from current session waypoints
+        const entries = this.waypoints.map(wp => ({
+            name: wp.name, code: wp.code, country: wp.country,
+            latitude: wp.latitude, longitude: wp.longitude, elevation: wp.elevation,
+            style: wp.style, runway_direction: wp.runway_direction,
+            runway_length: wp.runway_length, runway_width: wp.runway_width,
+            frequency: wp.frequency, description: wp.description
+        }));
+
+        showError('');
+        try {
+            const resp = await fetch('/api/waypoints/files', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name, description: desc, is_public: isPublic, waypoints: entries})
+            });
+            const data = await resp.json();
+            if (!resp.ok) { showError(data.error || 'Save failed.'); return; }
+            document.getElementById('save-waypoints-dialog').hide();
+        } catch (err) {
+            showError('Network error. Please try again.');
+        }
+    }
+
+    // ── My Files dialog ───────────────────────────────────────────────────────
+    async showMyFilesDialog() {
+        const dialog = document.getElementById('my-files-dialog');
+        const list = document.getElementById('my-files-list');
+        if (!dialog || !list) return;
+        list.innerHTML = '<p style="padding:.5rem">Loading…</p>';
+        dialog.show();
+        try {
+            const resp = await fetch('/api/waypoints/files');
+            const data = await resp.json();
+            if (!resp.ok) { list.innerHTML = '<p style="padding:.5rem">Failed to load files.</p>'; return; }
+            const files = Array.isArray(data) ? data : (data.files || []);
+            if (!files.length) { list.innerHTML = '<p class="browse-empty">No saved files yet.</p>'; return; }
+            list.innerHTML = files.map(f => `
+                <div class="browse-item" data-id="${f.id}">
+                    <div class="browse-item-main">
+                        <span class="browse-item-name">${this.escapeHtml(f.name)}</span>
+                        <span class="browse-item-meta">${f.waypoint_count} waypoints · ${f.is_public ? 'Public' : 'Private'}</span>
+                    </div>
+                    <div style="display:flex;gap:.4rem;flex-shrink:0">
+                        <sl-button size="small" data-action="load-file" data-id="${f.id}">Load</sl-button>
+                        <sl-button size="small" variant="danger" data-action="delete-file" data-id="${f.id}">Delete</sl-button>
+                    </div>
+                </div>`).join('');
+            list.querySelectorAll('[data-action="load-file"]').forEach(btn => {
+                btn.addEventListener('click', () => this._loadWaypointFile(btn.dataset.id, dialog));
+            });
+            list.querySelectorAll('[data-action="delete-file"]').forEach(btn => {
+                btn.addEventListener('click', () => this._deleteWaypointFile(btn.dataset.id, list));
+            });
+        } catch {
+            list.innerHTML = '<p style="padding:.5rem">Network error.</p>';
+        }
+    }
+
+    async _loadWaypointFile(fileId, dialog) {
+        try {
+            const resp = await fetch(`/api/waypoints/files/${fileId}`);
+            const data = await resp.json();
+            if (!resp.ok) return;
+            this.waypoints = data.waypoints || [];
+            this.updateUI(true);
+            if (dialog) dialog.hide();
+        } catch { /* silent */ }
+    }
+
+    async _deleteWaypointFile(fileId, listEl) {
+        if (!await window.showConfirmModal('Delete this waypoint file?')) return;
+        try {
+            const resp = await fetch(`/api/waypoints/files/${fileId}`, {method: 'DELETE'});
+            if (resp.ok) listEl.querySelector(`[data-action="delete-file"][data-id="${fileId}"]`)?.closest('.browse-item')?.remove();
+        } catch { /* silent */ }
     }
 }
 

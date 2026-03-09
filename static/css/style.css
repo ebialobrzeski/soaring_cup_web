@@ -1483,6 +1483,12 @@ sl-card::part(body) {
 .astt-time .fas {
     margin-right: 3px;
 }
+.astt-flags {
+    color: #f87171;
+    font-size: 11px;
+    font-weight: 600;
+    margin-top: 2px;
+}
 .astt-sep {
     border: none;
     border-top: 1px solid rgba(148,163,184,0.2);
@@ -1780,6 +1786,222 @@ sl-card::part(body) {
     color: #166534;
 }
 
+/* ── Admin Panel ─────────────────────────────────────────────────────────── */
+
+.admin-panel {
+    padding: 16px;
+    max-width: 1200px;
+    color: var(--text-primary);
+}
+
+.admin-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.admin-header h2 {
+    margin: 0;
+    font-size: 1.3rem;
+    color: var(--text-primary);
+}
+
+.admin-toolbar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 14px;
+}
+
+.admin-table-wrap {
+    overflow-x: auto;
+    transition: opacity .2s;
+}
+
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .87rem;
+}
+
+.admin-table th {
+    background: var(--surface);
+    padding: 8px 10px;
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+    border-bottom: 2px solid var(--border);
+    color: var(--text-secondary);
+}
+
+.admin-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+    color: var(--text-primary);
+}
+
+.admin-table td code {
+    color: var(--primary-color);
+    background: var(--surface);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: .82rem;
+}
+
+.admin-table tr:hover td {
+    background: var(--surface);
+}
+
+.admin-cell-email {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.admin-actions-cell {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    flex-wrap: nowrap;
+}
+
+.admin-error {
+    color: var(--danger-color);
+    padding: 8px 0;
+    font-size: .9rem;
+}
+
+/* Content sub-panel */
+.admin-content-user-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+    font-size: .95rem;
+    color: var(--text-primary);
+}
+
+.admin-content-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.admin-content-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text-primary);
+}
+
+.admin-content-item-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.admin-content-item-name {
+    font-weight: 600;
+    font-size: .9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.admin-content-item-meta {
+    font-size: .78rem;
+    color: var(--text-secondary);
+}
+
+/* Usage tracking panel */
+.usage-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.usage-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    background: var(--surface);
+    text-align: center;
+    color: var(--text-primary);
+}
+
+.usage-card-label {
+    font-size: .75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    margin-bottom: 4px;
+}
+
+.usage-card-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--primary-color);
+}
+
+.usage-card-errors {
+    color: var(--danger-color);
+}
+
+.usage-daily-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 100px;
+    padding: 8px 0;
+}
+
+.usage-bar {
+    flex: 1;
+    min-width: 4px;
+    background: var(--primary-color);
+    border-radius: 2px 2px 0 0;
+    position: relative;
+    cursor: default;
+}
+
+.usage-bar:hover {
+    background: var(--primary-hover);
+}
+
+.usage-bar[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: .7rem;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 10;
+}
+
+
 .xcsoar-repo-empty {
     padding: 24px;
     text-align: center;
@@ -1932,4 +2154,492 @@ html.sl-theme-dark .xcsoar-badge-as {
 
 .footer-sep {
     color: var(--border);
+}
+/*  Auth & Browse UI  */
+
+.browse-results-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 420px;
+    overflow-y: auto;
+}
+
+.browse-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    transition: background 0.15s;
+}
+
+.browse-item:hover {
+    background: var(--surface);
+}
+
+.browse-item-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.browse-item-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.browse-item-meta {
+    display: flex;
+    gap: 12px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    flex-wrap: wrap;
+    margin-top: 2px;
+}
+
+.browse-item-desc {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.browse-item-badges {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.browse-empty {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 24px 0;
+    font-size: 0.9rem;
+}
+
+.browse-page-info {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    padding: 0 8px;
+}
+
+/* AI Planner panel */
+.ai-planner-panel {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 400px;
+    padding: 32px 16px;
+}
+
+/* When the real form is rendered, let it fill the panel */
+.ai-planner-panel:has(.aip-layout) {
+    align-items: stretch;
+    justify-content: flex-start;
+    padding: 12px 16px;
+    width: 100%;
+}
+
+.ai-upgrade-cta {
+    text-align: center;
+    max-width: 520px;
+}
+
+.ai-upgrade-cta h2 {
+    margin: 0 0 12px;
+    font-size: 1.4rem;
+}
+
+.ai-upgrade-cta p {
+    color: var(--text-secondary);
+    margin-bottom: 20px;
+    line-height: 1.6;
+}
+
+.ai-planner-content {
+    text-align: left;
+    max-width: none;
+    width: 100%;
+}
+
+.ai-planner-content h2 {
+    margin-bottom: 12px;
+}
+
+.aip-layout {
+    display: flex;
+    gap: 20px;
+    height: calc(100vh - 200px);
+    min-height: 450px;
+    width: 100%;
+}
+
+.aip-sidebar {
+    flex: 0 0 340px;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+.aip-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+.aip-form-card {
+    width: 100%;
+}
+
+.aip-form-card sl-input,
+.aip-form-card sl-select,
+.aip-form-card sl-radio-group {
+    margin-bottom: 10px;
+}
+
+.aip-field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+/* Airport autocomplete */
+.aip-autocomplete-wrap {
+    position: relative;
+}
+
+.aip-ac-list {
+    display: none;
+    position: absolute;
+    z-index: 100;
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: var(--shadow-lg);
+    margin-top: 2px;
+    color: var(--text-primary);
+}
+
+.aip-ac-list.open {
+    display: block;
+}
+
+.aip-ac-item {
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: .85rem;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--text-primary);
+}
+
+.aip-ac-item:hover,
+.aip-ac-item.active {
+    background: var(--primary-color);
+    color: #fff;
+}
+
+.aip-ac-item:hover .aip-ac-item-meta,
+.aip-ac-item.active .aip-ac-item-meta {
+    color: rgba(255,255,255,.75);
+}
+
+.aip-ac-item-name {
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.aip-ac-item-meta {
+    color: var(--text-secondary);
+    font-size: .75rem;
+    white-space: nowrap;
+}
+
+.aip-field-row {
+    display: flex;
+    gap: 10px;
+}
+
+.aip-field-row > * {
+    flex: 1;
+}
+
+.aip-constraints {
+    margin-bottom: 8px;
+}
+
+.aip-constraints-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.aip-class-toggles {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+/* Status / empty state */
+.aip-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 48px 24px;
+    color: var(--text-secondary);
+    height: 100%;
+}
+
+.aip-empty-state h3 {
+    margin: 0 0 8px;
+    color: var(--text-primary, #e0e0e0);
+}
+
+.aip-empty-state p {
+    max-width: 400px;
+    line-height: 1.5;
+}
+
+.aip-error-state {
+    color: var(--danger-color);
+}
+
+/* Loading */
+.aip-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 48px 24px;
+    height: 100%;
+    color: var(--text-secondary);
+    gap: 12px;
+}
+.aip-loading[hidden] {
+    display: none;
+}
+
+/* Result */
+.aip-result-card {
+    width: 100%;
+}
+
+.aip-result-summary {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.aip-stat {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.aip-stat i {
+    color: var(--primary-color);
+    font-size: 1.1rem;
+}
+
+.aip-stat label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    display: block;
+}
+
+.aip-stat strong {
+    font-size: 1rem;
+}
+
+.aip-result-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+/* Legs table */
+.aip-legs {
+    width: 100%;
+    font-size: 0.85rem;
+    border-collapse: collapse;
+    margin-bottom: 12px;
+}
+
+.aip-legs th,
+.aip-legs td {
+    padding: 6px 10px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-primary);
+}
+
+.aip-legs th {
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+}
+
+/* Conflicts */
+.aip-conflicts h4 {
+    font-size: 0.9rem;
+    margin: 12px 0 6px;
+    color: #d97706;
+}
+
+.aip-conflict-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    font-size: 0.85rem;
+}
+
+.aip-conflict-list li {
+    padding: 4px 0;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+/* AI narrative */
+.aip-narrative-box {
+    display: flex;
+    gap: 10px;
+    padding: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.88rem;
+    line-height: 1.5;
+    margin-top: 12px;
+    color: var(--text-primary);
+}
+
+.aip-narrative-box > i {
+    color: var(--primary-color);
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+.aip-narrative-box.aip-weather-summary {
+    background: var(--surface);
+    border-left: 3px solid var(--primary-color);
+}
+
+.aip-narrative-box.aip-safety-notes {
+    border-left: 3px solid var(--sl-color-warning-500, #e6a700);
+}
+
+.aip-narrative-box.aip-safety-notes ul {
+    margin: 6px 0 0;
+    padding-left: 18px;
+}
+
+.aip-ai-attr {
+    text-align: right;
+    color: var(--text-secondary);
+    margin-top: 8px;
+    font-size: 0.78rem;
+}
+
+/* Score badge */
+.aip-score-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+.aip-score-excellent { background: var(--sl-color-success-100, #d4edda); color: var(--sl-color-success-700, #155724); }
+.aip-score-good      { background: var(--sl-color-primary-100, #cce5ff); color: var(--sl-color-primary-700, #004085); }
+.aip-score-marginal  { background: var(--sl-color-warning-100, #fff3cd); color: var(--sl-color-warning-700, #856404); }
+.aip-score-poor      { background: var(--sl-color-danger-100, #f8d7da);  color: var(--sl-color-danger-700, #721c24);  }
+
+html.sl-theme-dark .aip-score-excellent { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
+html.sl-theme-dark .aip-score-good      { background: rgba(59, 130, 246, 0.15); color: #93c5fd; }
+html.sl-theme-dark .aip-score-marginal  { background: rgba(234, 179, 8, 0.15);  color: #fde047; }
+html.sl-theme-dark .aip-score-poor      { background: rgba(239, 68, 68, 0.15);  color: #fca5a5; }
+
+/* Terrain info */
+.aip-terrain-info {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 12px;
+    margin-top: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+}
+
+.aip-terrain-info i {
+    color: var(--text-secondary);
+}
+
+/* Alternative routes */
+.aip-alternatives h4 {
+    margin: 14px 0 8px;
+    font-size: 0.92rem;
+    color: var(--text-primary);
+}
+
+.aip-alt-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.aip-alt-card {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 8px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+}
+
+.aip-alt-desc { flex: 1; }
+.aip-alt-dist { color: var(--text-secondary); }
+.aip-alt-score { font-weight: 600; min-width: 50px; text-align: right; }
+
+/* Responsive */
+@media (max-width: 768px) {
+    .aip-layout {
+        flex-direction: column;
+        height: auto;
+    }
+    .aip-sidebar {
+        flex: none;
+        width: 100%;
+    }
 }
