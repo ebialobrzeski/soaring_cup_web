@@ -1,12 +1,8 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:18
     container_name: postgres
     restart: always
-    networks:
-      - main-stack_net
     env_file:
       - .env
     ports:
@@ -41,9 +37,3 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    networks:
-      - main-stack_net
-
-networks:
-  main-stack_net:
-    driver: bridge
