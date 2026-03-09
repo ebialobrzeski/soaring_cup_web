@@ -5,7 +5,7 @@ import uuid
 from typing import Optional
 
 from sqlalchemy import Boolean, ForeignKey, Integer, Numeric, String, Text, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.models.base import Base, TimestampMixin
@@ -28,6 +28,8 @@ class WaypointFile(TimestampMixin, Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default='TRUE')
     waypoint_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default='0')
+    country_codes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    bbox: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     entries: Mapped[list['WaypointEntry']] = relationship(
         'WaypointEntry', back_populates='file', cascade='all, delete-orphan', lazy='dynamic'
@@ -41,6 +43,8 @@ class WaypointFile(TimestampMixin, Base):
             'description': self.description,
             'is_public': self.is_public,
             'waypoint_count': self.waypoint_count,
+            'country_codes': self.country_codes,
+            'bbox': self.bbox,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }

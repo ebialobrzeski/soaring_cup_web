@@ -4,6 +4,10 @@ Routes:
   GET  /api/airspace/openaip           — fetch OpenAIP airspace zones for map bounds (public)
   POST /api/planner/generate           — generate an AI task proposal (premium)
   GET  /api/planner/gliders            — list available glider polars (premium)
+  POST /api/planner/gliders            — create a custom user glider (login)
+  GET  /api/planner/gliders/<id>/polar — get full polar data for chart (premium)
+  PATCH /api/planner/gliders/<id>      — update a custom user glider (login)
+  DELETE /api/planner/gliders/<id>     — delete a custom user glider (login)
   GET  /api/planner/airports           — search airports by name/ICAO (premium)
   POST /api/planner/airspace           — check airspace conflicts for given points (premium)
   GET  /api/planner/sessions           — list user's planner sessions (premium)
@@ -37,7 +41,7 @@ from backend.task_planner.optimizer import (
 )
 from backend.task_planner.terrain import check_task_terrain
 from backend.task_planner.weather import fetch_weather_grid
-from backend.utils.auth_decorators import premium_required
+from backend.utils.auth_decorators import login_required, premium_required
 
 logger = logging.getLogger(__name__)
 
@@ -137,12 +141,21 @@ def openaip_airspace():
 @ai_planner_bp.route("/api/planner/gliders", methods=["GET"])
 @premium_required
 def list_gliders():
-    """Return available glider polars for the dropdown."""
+    """Return available glider polars for the dropdown.
+    
+    Returns global gliders plus the current user's custom gliders.
+    """
     db = get_db()
+    user_id = str(current_user.id) if current_user.is_authenticated else None
     try:
         rows = db.execute(
-            text("SELECT id, name, max_gross_kg, max_ballast_l, wing_area_m2 "
-                 "FROM glider_polars ORDER BY name")
+            text("""
+                SELECT id, name, max_gross_kg, max_ballast_l, wing_area_m2, user_id, v1_kmh, v3_kmh
+                FROM glider_polars
+                WHERE user_id IS NULL OR user_id = :uid
+                ORDER BY user_id NULLS LAST, name
+            """),
+            {"uid": user_id},
         ).fetchall()
         gliders = [
             {
@@ -151,13 +164,193 @@ def list_gliders():
                 "max_gross_kg": r[2],
                 "max_ballast_l": r[3],
                 "wing_area_m2": r[4],
+                "is_custom": r[5] is not None,
+                "v1_kmh": float(r[6]) if r[6] is not None else None,
+                "v3_kmh": float(r[7]) if r[7] is not None else None,
             }
             for r in rows
         ]
     except Exception:
-        # Table may not exist yet — return empty list
         gliders = []
     return jsonify(gliders)
+
+
+@ai_planner_bp.route("/api/planner/gliders/<glider_id>/polar", methods=["GET"])
+@premium_required
+def get_glider_polar(glider_id: str):
+    """Return full polar data for a glider (for chart rendering)."""
+    db = get_db()
+    user_id = str(current_user.id)
+    try:
+        row = db.execute(
+            text("""
+                SELECT id, name, polar_a, polar_b, polar_c,
+                       v1_kmh, w1_ms, v2_kmh, w2_ms, v3_kmh, w3_ms,
+                       max_gross_kg, reference_mass_kg, wing_area_m2, handicap, user_id
+                FROM glider_polars
+                WHERE id = :gid AND (user_id IS NULL OR user_id = :uid)
+            """),
+            {"gid": glider_id, "uid": user_id},
+        ).fetchone()
+    except Exception:
+        return jsonify({"error": "Database error"}), 500
+
+    if not row:
+        return jsonify({"error": "Glider not found"}), 404
+
+    return jsonify({
+        "id": str(row[0]),
+        "name": row[1],
+        "polar_a": row[2],
+        "polar_b": row[3],
+        "polar_c": row[4],
+        "v1_kmh": row[5], "w1_ms": row[6],
+        "v2_kmh": row[7], "w2_ms": row[8],
+        "v3_kmh": row[9], "w3_ms": row[10],
+        "max_gross_kg": row[11],
+        "reference_mass_kg": row[12],
+        "wing_area_m2": row[13],
+        "handicap": row[14],
+        "is_custom": row[15] is not None,
+    })
+
+
+@ai_planner_bp.route("/api/planner/gliders", methods=["POST"])
+@login_required
+def create_glider():
+    """Create a custom user glider polar."""
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "Glider name is required."}), 400
+
+    try:
+        v1 = float(data["v1_kmh"])
+        w1 = float(data["w1_ms"])
+        v2 = float(data["v2_kmh"])
+        w2 = float(data["w2_ms"])
+        v3 = float(data["v3_kmh"])
+        w3 = float(data["w3_ms"])
+        max_gross = int(data.get("max_gross_kg") or 500)
+    except (KeyError, ValueError, TypeError) as exc:
+        return jsonify({"error": f"Invalid polar data: {exc}"}), 400
+
+    # Compute polar coefficients via least-squares fit
+    import numpy as np
+    speeds_ms = np.array([v1, v2, v3]) / 3.6
+    sinks = np.array([w1, w2, w3])
+    A = np.column_stack([speeds_ms**2, speeds_ms, np.ones_like(speeds_ms)])
+    coeffs, *_ = np.linalg.lstsq(A, sinks, rcond=None)
+    polar_a, polar_b, polar_c = float(coeffs[0]), float(coeffs[1]), float(coeffs[2])
+
+    db = get_db()
+    user_id = str(current_user.id)
+    try:
+        row = db.execute(
+            text("""
+                INSERT INTO glider_polars
+                    (name, source, user_id, max_gross_kg, max_ballast_l,
+                     v1_kmh, w1_ms, v2_kmh, w2_ms, v3_kmh, w3_ms,
+                     polar_a, polar_b, polar_c)
+                VALUES
+                    (:name, 'custom', :uid, :max_gross, 0,
+                     :v1, :w1, :v2, :w2, :v3, :w3,
+                     :pa, :pb, :pc)
+                RETURNING id
+            """),
+            {
+                "name": name, "uid": user_id, "max_gross": max_gross,
+                "v1": v1, "w1": w1, "v2": v2, "w2": w2, "v3": v3, "w3": w3,
+                "pa": polar_a, "pb": polar_b, "pc": polar_c,
+            },
+        ).fetchone()
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Create glider error")
+        return jsonify({"error": "Could not save glider."}), 500
+
+    return jsonify({"id": str(row[0]), "name": name, "is_custom": True}), 201
+
+
+@ai_planner_bp.route("/api/planner/gliders/<glider_id>", methods=["PATCH"])
+@login_required
+def update_glider(glider_id: str):
+    """Update a custom glider (user must own it)."""
+    db = get_db()
+    user_id = str(current_user.id)
+
+    # Verify ownership
+    existing = db.execute(
+        text("SELECT id FROM glider_polars WHERE id = :gid AND user_id = :uid"),
+        {"gid": glider_id, "uid": user_id},
+    ).fetchone()
+    if not existing:
+        return jsonify({"error": "Glider not found or not yours."}), 404
+
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "Glider name is required."}), 400
+
+    try:
+        v1 = float(data["v1_kmh"])
+        w1 = float(data["w1_ms"])
+        v2 = float(data["v2_kmh"])
+        w2 = float(data["w2_ms"])
+        v3 = float(data["v3_kmh"])
+        w3 = float(data["w3_ms"])
+        max_gross = int(data.get("max_gross_kg") or 500)
+    except (KeyError, ValueError, TypeError) as exc:
+        return jsonify({"error": f"Invalid polar data: {exc}"}), 400
+
+    import numpy as np
+    speeds_ms = np.array([v1, v2, v3]) / 3.6
+    sinks = np.array([w1, w2, w3])
+    A = np.column_stack([speeds_ms**2, speeds_ms, np.ones_like(speeds_ms)])
+    coeffs, *_ = np.linalg.lstsq(A, sinks, rcond=None)
+    polar_a, polar_b, polar_c = float(coeffs[0]), float(coeffs[1]), float(coeffs[2])
+
+    try:
+        db.execute(
+            text("""
+                UPDATE glider_polars SET
+                    name = :name, max_gross_kg = :max_gross,
+                    v1_kmh = :v1, w1_ms = :w1, v2_kmh = :v2, w2_ms = :w2,
+                    v3_kmh = :v3, w3_ms = :w3,
+                    polar_a = :pa, polar_b = :pb, polar_c = :pc
+                WHERE id = :gid AND user_id = :uid
+            """),
+            {
+                "name": name, "max_gross": max_gross,
+                "v1": v1, "w1": w1, "v2": v2, "w2": w2, "v3": v3, "w3": w3,
+                "pa": polar_a, "pb": polar_b, "pc": polar_c,
+                "gid": glider_id, "uid": user_id,
+            },
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Update glider error")
+        return jsonify({"error": "Could not update glider."}), 500
+
+    return jsonify({"ok": True})
+
+
+@ai_planner_bp.route("/api/planner/gliders/<glider_id>", methods=["DELETE"])
+@login_required
+def delete_glider(glider_id: str):
+    """Delete a custom glider (user must own it)."""
+    db = get_db()
+    user_id = str(current_user.id)
+    result = db.execute(
+        text("DELETE FROM glider_polars WHERE id = :gid AND user_id = :uid"),
+        {"gid": glider_id, "uid": user_id},
+    )
+    db.commit()
+    if result.rowcount == 0:
+        return jsonify({"error": "Glider not found or not yours."}), 404
+    return jsonify({"ok": True})
 
 
 # ── Airport search ───────────────────────────────────────────────────────────

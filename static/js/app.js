@@ -69,7 +69,6 @@ class SoaringCupEditor {
 
             // Account save/browse
             document.getElementById('save-to-account-btn')?.addEventListener('click', () => this.showSaveWaypointsDialog());
-            document.getElementById('my-files-btn')?.addEventListener('click', () => this.showMyFilesDialog());
             document.getElementById('browse-waypoints-btn')?.addEventListener('click', () => window.waypointBrowser?.open());
         }
 
@@ -1183,59 +1182,6 @@ class SoaringCupEditor {
         }
     }
 
-    // ── My Files dialog ───────────────────────────────────────────────────────
-    async showMyFilesDialog() {
-        const dialog = document.getElementById('my-files-dialog');
-        const list = document.getElementById('my-files-list');
-        if (!dialog || !list) return;
-        list.innerHTML = '<p style="padding:.5rem">Loading…</p>';
-        dialog.show();
-        try {
-            const resp = await fetch('/api/waypoints/files');
-            const data = await resp.json();
-            if (!resp.ok) { list.innerHTML = '<p style="padding:.5rem">Failed to load files.</p>'; return; }
-            const files = Array.isArray(data) ? data : (data.files || []);
-            if (!files.length) { list.innerHTML = '<p class="browse-empty">No saved files yet.</p>'; return; }
-            list.innerHTML = files.map(f => `
-                <div class="browse-item" data-id="${f.id}">
-                    <div class="browse-item-main">
-                        <span class="browse-item-name">${this.escapeHtml(f.name)}</span>
-                        <span class="browse-item-meta">${f.waypoint_count} waypoints · ${f.is_public ? 'Public' : 'Private'}</span>
-                    </div>
-                    <div style="display:flex;gap:.4rem;flex-shrink:0">
-                        <sl-button size="small" data-action="load-file" data-id="${f.id}">Load</sl-button>
-                        <sl-button size="small" variant="danger" data-action="delete-file" data-id="${f.id}">Delete</sl-button>
-                    </div>
-                </div>`).join('');
-            list.querySelectorAll('[data-action="load-file"]').forEach(btn => {
-                btn.addEventListener('click', () => this._loadWaypointFile(btn.dataset.id, dialog));
-            });
-            list.querySelectorAll('[data-action="delete-file"]').forEach(btn => {
-                btn.addEventListener('click', () => this._deleteWaypointFile(btn.dataset.id, list));
-            });
-        } catch {
-            list.innerHTML = '<p style="padding:.5rem">Network error.</p>';
-        }
-    }
-
-    async _loadWaypointFile(fileId, dialog) {
-        try {
-            const resp = await fetch(`/api/waypoints/files/${fileId}`);
-            const data = await resp.json();
-            if (!resp.ok) return;
-            this.waypoints = data.waypoints || [];
-            this.updateUI(true);
-            if (dialog) dialog.hide();
-        } catch { /* silent */ }
-    }
-
-    async _deleteWaypointFile(fileId, listEl) {
-        if (!await window.showConfirmModal('Delete this waypoint file?')) return;
-        try {
-            const resp = await fetch(`/api/waypoints/files/${fileId}`, {method: 'DELETE'});
-            if (resp.ok) listEl.querySelector(`[data-action="delete-file"][data-id="${fileId}"]`)?.closest('.browse-item')?.remove();
-        } catch { /* silent */ }
-    }
 }
 
 // Initialize app when DOM is loaded

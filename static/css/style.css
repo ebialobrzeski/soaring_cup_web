@@ -260,6 +260,11 @@ sl-tooltip {
     --indicator-color: var(--primary-color);
 }
 
+/* Give all tab label icons a small right gap so they don't touch the text */
+#main-tabs sl-tab i {
+    margin-right: 5px;
+}
+
 #main-tabs::part(base) {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -881,7 +886,7 @@ html.sl-theme-dark .text-danger { color: #f87171; }
     display: flex;
     flex-direction: column;
     gap: 6px;
-    overflow: hidden;
+    overflow-y: auto;
     min-height: 0;
     padding-right: 2px;
 }
@@ -1051,14 +1056,25 @@ sl-card {
 }
 
 sl-card::part(header) {
-    padding: 8px 12px;
+    padding: 8px 16px;
     font-weight: 600;
     font-size: 13px;
     border-bottom: 1px solid var(--border);
 }
 
 sl-card::part(body) {
-    padding: 10px 12px;
+    padding: 10px 16px;
+}
+
+/* Prefix icons inside sl-input: space from left border and from following text */
+sl-input::part(prefix) {
+    padding-inline-start: 10px;
+    padding-inline-end: 6px;
+}
+
+/* Waypoints count badge: gap between pin icon and count text */
+#waypoint-count-badge i {
+    margin-right: 4px;
 }
 
 .card-header-with-icon {
@@ -2217,6 +2233,21 @@ html.sl-theme-dark .xcsoar-badge-as {
     flex-shrink: 0;
 }
 
+.browse-item-minimap {
+    flex-shrink: 0;
+    background: #f0f4ff;
+    border-radius: 4px;
+    border: 1px solid #c7d2fe;
+    align-self: center;
+}
+
+.browse-item-countries {
+    display: flex;
+    gap: 3px;
+    flex-wrap: wrap;
+    margin-top: 3px;
+}
+
 .browse-empty {
     text-align: center;
     color: var(--text-secondary);
@@ -2314,6 +2345,22 @@ html.sl-theme-dark .xcsoar-badge-as {
 /* Airport autocomplete */
 .aip-autocomplete-wrap {
     position: relative;
+}
+
+.aip-glider-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.aip-custom-badge {
+    font-size: 0.68rem;
+    background: #dbeafe;
+    color: #1d4ed8;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-weight: 500;
+    flex-shrink: 0;
 }
 
 .aip-ac-list {

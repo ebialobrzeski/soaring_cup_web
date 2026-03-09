@@ -74,6 +74,7 @@ def create_task(
         task_data=task_data,
         waypoint_file_id=wf_id,
         total_distance=total_distance,
+        bbox=_compute_bbox(task_data),
     )
     db.add(task)
     db.flush()
@@ -128,6 +129,7 @@ def update_task(
         task.description = description
     if task_data:
         task.task_data = task_data
+        task.bbox = _compute_bbox(task_data)
     if total_distance is not None:
         task.total_distance = total_distance
 
@@ -155,6 +157,24 @@ def set_visibility(db: Session, user: User, task_id: str, is_public: bool) -> Sa
     task.is_public = is_public
     logger.info('Set task %s visibility to %s for user %s', task_id, is_public, user.id)
     return task
+
+
+def _compute_bbox(task_data: dict) -> Optional[dict]:
+    """Compute a bounding box dict from task_data points."""
+    points = task_data.get('points', [])
+    lats = [
+        p['waypoint']['latitude']
+        for p in points
+        if isinstance(p, dict) and isinstance(p.get('waypoint'), dict) and 'latitude' in p['waypoint']
+    ]
+    lons = [
+        p['waypoint']['longitude']
+        for p in points
+        if isinstance(p, dict) and isinstance(p.get('waypoint'), dict) and 'longitude' in p['waypoint']
+    ]
+    if not lats:
+        return None
+    return {'minLat': min(lats), 'maxLat': max(lats), 'minLon': min(lons), 'maxLon': max(lons)}
 
 
 def _parse_uuid(value: Optional[str]) -> Optional[uuid.UUID]:

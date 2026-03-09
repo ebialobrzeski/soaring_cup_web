@@ -36,8 +36,11 @@ class AiPlanner {
         document.getElementById('aip-load-editor-btn')
             ?.addEventListener('click', () => this._loadIntoEditor());
 
-        // Fetch glider list then set up autocomplete
-        this._fetchGliders().then(() => this._setupGliderAutocomplete());
+        // Fetch glider list then set up autocomplete and management
+        this._fetchGliders().then(() => {
+            this._setupGliderAutocomplete();
+            this._setupGliderManagement();
+        });
 
         // Airport autocomplete
         this._setupAirportAutocomplete('aip-takeoff', 'aip-takeoff-ac');
@@ -193,6 +196,8 @@ class AiPlanner {
         input.addEventListener('sl-clear', () => {
             hidden.value = '';
             input.value = '';
+            const polarBtn = document.getElementById('aip-glider-polar-btn');
+            if (polarBtn) polarBtn.style.display = 'none';
             this._closeAcList(list);
         });
 
@@ -230,9 +235,10 @@ class AiPlanner {
             return;
         }
         listEl.innerHTML = gliders.map(g => {
-            const label = `${g.name} (${g.max_gross_kg} kg)`;
+            const label = `${g.name}${g.max_gross_kg ? ' (' + g.max_gross_kg + ' kg)' : ''}`;
+            const badge = g.is_custom ? '<span class="aip-custom-badge">custom</span>' : '';
             return `<div class="aip-ac-item" data-id="${g.id}" data-name="${this._escapeAttr(g.name)}">
-                <span class="aip-ac-item-name">${this._escapeHtml(label)}</span>
+                <span class="aip-ac-item-name">${this._escapeHtml(label)}</span>${badge}
             </div>`;
         }).join('');
 
@@ -240,11 +246,288 @@ class AiPlanner {
             item.addEventListener('click', () => {
                 hiddenEl.value = item.dataset.id;
                 inputEl.value = item.dataset.name;
+                const polarBtn = document.getElementById('aip-glider-polar-btn');
+                if (polarBtn) polarBtn.style.display = '';
                 this._closeAcList(listEl);
             });
         });
 
         listEl.classList.add('open');
+    }
+
+    // ── Custom glider management ─────────────────────────────────────────────
+
+    _setupGliderManagement() {
+        // Show manage-gliders button for authenticated users
+        const manageBtn = document.getElementById('aip-manage-gliders-btn');
+        if (manageBtn && !manageBtn.style.display.includes('none')) {
+            // Already visible (set by auth system)
+        }
+
+        document.getElementById('aip-glider-polar-btn')?.addEventListener('click', () => {
+            const id = document.getElementById('aip-glider-id')?.value;
+            if (id) this._showPolarChart(id);
+        });
+
+        document.getElementById('aip-manage-gliders-btn')?.addEventListener('click', () => {
+            this._openManageGlidersDialog();
+        });
+
+        document.getElementById('aip-glider-add-new-btn')?.addEventListener('click', () => {
+            this._showGliderForm(null);
+        });
+
+        document.getElementById('aip-glider-save-btn')?.addEventListener('click', () => {
+            this._submitGliderForm();
+        });
+
+        document.getElementById('aip-glider-cancel-btn')?.addEventListener('click', () => {
+            this._hideGliderForm();
+        });
+
+        document.getElementById('aip-glider-delete-btn')?.addEventListener('click', () => {
+            this._deleteCurrentGlider();
+        });
+    }
+
+    async _openManageGlidersDialog() {
+        const dialog = document.getElementById('aip-custom-glider-dialog');
+        if (!dialog) return;
+        this._hideGliderForm();
+        await this._loadCustomGlidersList();
+        dialog.show();
+    }
+
+    async _loadCustomGlidersList() {
+        const listEl = document.getElementById('aip-custom-gliders-list');
+        if (!listEl) return;
+        const customGliders = (this._gliders || []).filter(g => g.is_custom);
+        if (!customGliders.length) {
+            listEl.innerHTML = '<p style="color:var(--text-secondary); font-size:0.88rem; margin:0;">No custom gliders yet. Click "Add new" to create one.</p>';
+            return;
+        }
+        listEl.innerHTML = customGliders.map(g => `
+            <div class="browse-item" style="gap:8px; align-items:center;">
+                <div class="browse-item-main">
+                    <span class="browse-item-name">${this._escapeHtml(g.name)}</span>
+                    ${g.max_gross_kg ? `<span class="browse-item-meta" style="display:block; margin-top:1px;">${g.max_gross_kg} kg</span>` : ''}
+                </div>
+                <sl-button size="small" variant="neutral" data-action="polar-glider" data-id="${g.id}" title="View polar chart">
+                    <i class="fas fa-chart-line"></i>
+                </sl-button>
+                <sl-button size="small" data-action="edit-glider" data-id="${g.id}" title="Edit">
+                    <i class="fas fa-pencil-alt"></i>
+                </sl-button>
+            </div>`).join('');
+        listEl.querySelectorAll('[data-action="edit-glider"]').forEach(btn => {
+            btn.addEventListener('click', () => this._editCustomGlider(btn.dataset.id));
+        });
+        listEl.querySelectorAll('[data-action="polar-glider"]').forEach(btn => {
+            btn.addEventListener('click', () => this._showPolarChart(btn.dataset.id));
+        });
+    }
+
+    _showGliderForm(glider) {
+        const form = document.getElementById('aip-glider-form-section');
+        if (!form) return;
+        form.style.display = '';
+        const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val ?? ''; };
+        set('aip-glider-form-name', glider?.name);
+        set('aip-glider-form-v1', glider?.v1_kmh);
+        set('aip-glider-form-w1', glider?.w1_ms);
+        set('aip-glider-form-v2', glider?.v2_kmh);
+        set('aip-glider-form-w2', glider?.w2_ms);
+        set('aip-glider-form-v3', glider?.v3_kmh);
+        set('aip-glider-form-w3', glider?.w3_ms);
+        set('aip-glider-form-max-gross', glider?.max_gross_kg);
+        const errEl = document.getElementById('aip-glider-form-error');
+        if (errEl) errEl.style.display = 'none';
+        const delBtn = document.getElementById('aip-glider-delete-btn');
+        if (delBtn) delBtn.style.display = glider ? '' : 'none';
+        form.dataset.editId = glider?.id || '';
+    }
+
+    _hideGliderForm() {
+        const form = document.getElementById('aip-glider-form-section');
+        if (form) form.style.display = 'none';
+    }
+
+    async _editCustomGlider(id) {
+        const resp = await fetch(`/api/planner/gliders/${id}/polar`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        this._showGliderForm(data);
+    }
+
+    async _submitGliderForm() {
+        const form = document.getElementById('aip-glider-form-section');
+        const errorEl = document.getElementById('aip-glider-form-error');
+        const editId = form?.dataset.editId || null;
+        const showError = (msg) => { if (errorEl) { errorEl.textContent = msg; errorEl.style.display = msg ? '' : 'none'; } };
+        showError('');
+
+        const get = (id) => document.getElementById(id)?.value?.trim() || '';
+        const name = get('aip-glider-form-name');
+        const v1 = parseFloat(get('aip-glider-form-v1'));
+        const w1 = parseFloat(get('aip-glider-form-w1'));
+        const v2 = parseFloat(get('aip-glider-form-v2'));
+        const w2 = parseFloat(get('aip-glider-form-w2'));
+        const v3 = parseFloat(get('aip-glider-form-v3'));
+        const w3 = parseFloat(get('aip-glider-form-w3'));
+        const max_gross = parseInt(get('aip-glider-form-max-gross')) || 500;
+
+        if (!name) { showError('Please enter a glider name.'); return; }
+        if ([v1, w1, v2, w2, v3, w3].some(isNaN)) { showError('Please fill in all speed and sink values.'); return; }
+
+        const payload = { name, v1_kmh: v1, w1_ms: w1, v2_kmh: v2, w2_ms: w2, v3_kmh: v3, w3_ms: w3, max_gross_kg: max_gross };
+        const url = editId ? `/api/planner/gliders/${editId}` : '/api/planner/gliders';
+        const method = editId ? 'PATCH' : 'POST';
+
+        try {
+            const resp = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const data = await resp.json();
+            if (!resp.ok) { showError(data.error || 'Save failed.'); return; }
+            await this._fetchGliders();
+            this._hideGliderForm();
+            await this._loadCustomGlidersList();
+        } catch { showError('Network error. Please try again.'); }
+    }
+
+    async _deleteCurrentGlider() {
+        const form = document.getElementById('aip-glider-form-section');
+        const id = form?.dataset.editId;
+        if (!id) return;
+        if (!await window.showConfirmModal('Delete this custom glider? This cannot be undone.')) return;
+        const resp = await fetch(`/api/planner/gliders/${id}`, { method: 'DELETE' });
+        if (!resp.ok) return;
+        await this._fetchGliders();
+        this._hideGliderForm();
+        await this._loadCustomGlidersList();
+    }
+
+    // ── Polar chart ──────────────────────────────────────────────────────────
+
+    async _showPolarChart(gliderId) {
+        if (!gliderId) return;
+        const dialog = document.getElementById('aip-polar-chart-dialog');
+        if (!dialog) return;
+        dialog.show();
+        try {
+            const resp = await fetch(`/api/planner/gliders/${gliderId}/polar`);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            // Wait for dialog to be visible before drawing
+            setTimeout(() => this._drawPolarChart(data), 80);
+        } catch { /* silent */ }
+    }
+
+    _drawPolarChart(data) {
+        const canvas = document.getElementById('aip-polar-canvas');
+        if (!canvas) return;
+        const dpr = window.devicePixelRatio || 1;
+        const cssW = 440, cssH = 270;
+        canvas.width = cssW * dpr;
+        canvas.height = cssH * dpr;
+        canvas.style.width = cssW + 'px';
+        canvas.style.height = cssH + 'px';
+
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+
+        const pad = { top: 18, right: 20, bottom: 38, left: 46 };
+        const chartW = cssW - pad.left - pad.right;
+        const chartH = cssH - pad.top - pad.bottom;
+
+        // Compute axis bounds
+        const vMinKmh = 50, vMaxKmh = 280;
+        const vMin = vMinKmh / 3.6, vMax = vMaxKmh / 3.6;
+        const wMin = -3.8, wMax = 0.3;
+
+        const toX = v => pad.left + (v - vMin) / (vMax - vMin) * chartW;
+        const toY = w => pad.top + (1 - (w - wMin) / (wMax - wMin)) * chartH;
+
+        // Background
+        ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--surface').trim() || '#fff';
+        ctx.fillRect(0, 0, cssW, cssH);
+
+        // Grid lines
+        ctx.strokeStyle = '#e5e7eb';
+        ctx.lineWidth = 1;
+        [-0.5, -1.0, -1.5, -2.0, -2.5, -3.0, -3.5].forEach(w => {
+            ctx.beginPath();
+            ctx.moveTo(toX(vMin), toY(w));
+            ctx.lineTo(toX(vMax), toY(w));
+            ctx.stroke();
+            ctx.fillStyle = '#6b7280';
+            ctx.font = `${10 * dpr / dpr}px sans-serif`;
+            ctx.textAlign = 'right';
+            ctx.fillText(w.toFixed(1), pad.left - 5, toY(w) + 3.5);
+        });
+        [70, 100, 130, 160, 190, 220, 250].forEach(vkmh => {
+            const v = vkmh / 3.6;
+            ctx.beginPath();
+            ctx.moveTo(toX(v), toY(wMin));
+            ctx.lineTo(toX(v), toY(wMax));
+            ctx.stroke();
+            ctx.fillStyle = '#6b7280';
+            ctx.textAlign = 'center';
+            ctx.fillText(String(vkmh), toX(v), cssH - pad.bottom + 13);
+        });
+
+        // Axes
+        ctx.strokeStyle = '#374151';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(toX(vMin), toY(wMin)); ctx.lineTo(toX(vMin), toY(wMax)); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(toX(vMin), toY(0)); ctx.lineTo(toX(vMax), toY(0)); ctx.stroke();
+
+        // Axis labels
+        ctx.fillStyle = '#374151';
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Speed (km/h)', pad.left + chartW / 2, cssH - 4);
+        ctx.save();
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('Sink (m/s)', -(pad.top + chartH / 2), 13);
+        ctx.restore();
+
+        // Polar curve
+        const a = data.polar_a, b = data.polar_b, c = data.polar_c;
+        if (a != null && b != null && c != null) {
+            ctx.beginPath();
+            ctx.strokeStyle = '#2563eb';
+            ctx.lineWidth = 2;
+            let first = true;
+            for (let v = vMin; v <= vMax; v += 0.2) {
+                const w = a * v * v + b * v + c;
+                if (first) { ctx.moveTo(toX(v), toY(w)); first = false; }
+                else ctx.lineTo(toX(v), toY(w));
+            }
+            ctx.stroke();
+        }
+
+        // Data points
+        [[data.v1_kmh, data.w1_ms], [data.v2_kmh, data.w2_ms], [data.v3_kmh, data.w3_ms]]
+            .filter(([v, w]) => v != null && w != null)
+            .forEach(([vkmh, w]) => {
+                const v = vkmh / 3.6;
+                ctx.beginPath();
+                ctx.fillStyle = '#e63946';
+                ctx.arc(toX(v), toY(w), 4, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+        // Title + info
+        const titleEl = document.getElementById('aip-polar-title');
+        if (titleEl) titleEl.textContent = data.name || '';
+        const infoEl = document.getElementById('aip-polar-info');
+        if (infoEl) {
+            const parts = [];
+            if (data.max_gross_kg) parts.push(`Max gross: ${data.max_gross_kg} kg`);
+            if (data.reference_mass_kg) parts.push(`Ref. mass: ${data.reference_mass_kg} kg`);
+            if (data.wing_area_m2) parts.push(`Wing: ${data.wing_area_m2} m²`);
+            if (data.handicap) parts.push(`Handicap: ${data.handicap}`);
+            infoEl.textContent = parts.join(' · ');
+        }
     }
 
     // ── Collect form data ────────────────────────────────────────────────────

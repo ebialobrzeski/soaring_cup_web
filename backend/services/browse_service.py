@@ -106,6 +106,8 @@ def browse_waypoint_files(
             'is_mine': is_mine,
             'waypoint_count': f.waypoint_count,
             'created_at': f.created_at.isoformat() if f.created_at else None,
+            'country_codes': f.country_codes,
+            'bbox': f.bbox,
         })
 
     return {'items': items, 'total': total, 'page': page, 'per_page': per_page}
@@ -172,7 +174,14 @@ def browse_tasks(
     for t in tasks:
         td = t.task_data or {}
         is_mine = bool(current_user and t.owner_id == current_user.id)
-        points = td.get('points', [])
+        raw_points = td.get('points', [])
+        # Compact lat/lon list for minimap rendering in the browser
+        minimap_points = [
+            {'lat': p['waypoint']['latitude'], 'lon': p['waypoint']['longitude']}
+            for p in raw_points
+            if isinstance(p, dict) and isinstance(p.get('waypoint'), dict)
+            and 'latitude' in p['waypoint'] and 'longitude' in p['waypoint']
+        ]
         items.append({
             'id': str(t.id),
             'name': t.name,
@@ -181,8 +190,10 @@ def browse_tasks(
             'is_public': t.is_public,
             'is_mine': is_mine,
             'total_distance': float(t.total_distance) if t.total_distance else None,
-            'turnpoint_count': len(points),
+            'turnpoint_count': len(raw_points),
             'created_at': t.created_at.isoformat() if t.created_at else None,
+            'bbox': t.bbox,
+            'points': minimap_points,
         })
 
     return {'items': items, 'total': total, 'page': page, 'per_page': per_page}

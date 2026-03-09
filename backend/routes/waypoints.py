@@ -161,7 +161,6 @@ def create_file():
 
 
 @waypoints_bp.route('/files/<file_id>', methods=['GET'])
-@login_required
 def get_file(file_id):
     get_session_waypoints, set_session_waypoints = _get_session_helpers()
     from backend.models.legacy import Waypoint

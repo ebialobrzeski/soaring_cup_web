@@ -106,6 +106,11 @@ class BrowseDialog {
             const mine = item.is_mine ? '<sl-badge variant="primary" pill>Mine</sl-badge>' : '';
 
             if (this.type === 'waypoints') {
+                const countryBadges = item.country_codes
+                    ? item.country_codes.split(',').slice(0, 5)
+                          .map(c => `<sl-badge variant="neutral" pill>${escapeHtml(c.trim())}</sl-badge>`)
+                          .join('')
+                    : '';
                 row.innerHTML = `
                     <div class="browse-item-main">
                         <div class="browse-item-name">${escapeHtml(item.name)}</div>
@@ -114,14 +119,18 @@ class BrowseDialog {
                             <span><i class="fas fa-map-marker-alt"></i> ${item.waypoint_count} waypoints</span>
                             <span><i class="fas fa-calendar"></i> ${this._formatDate(item.created_at)}</span>
                         </div>
+                        ${countryBadges ? `<div class="browse-item-countries">${countryBadges}</div>` : ''}
                         ${item.description ? `<div class="browse-item-desc">${escapeHtml(item.description)}</div>` : ''}
                     </div>
                     <div class="browse-item-badges">${privacyBadge}${mine}</div>
                     <sl-button size="small" variant="primary" class="browse-load-btn">Load</sl-button>
+                    ${item.is_mine ? '<sl-button size="small" variant="danger" class="browse-delete-btn" title="Delete"><i class="fas fa-trash"></i></sl-button>' : ''}
                 `;
             } else {
                 const dist = item.total_distance ? `${item.total_distance.toFixed(1)} km` : '—';
+                const minimap = this._renderTaskMinimap(item.points);
                 row.innerHTML = `
+                    ${minimap}
                     <div class="browse-item-main">
                         <div class="browse-item-name">${escapeHtml(item.name)}</div>
                         <div class="browse-item-meta">
@@ -134,12 +143,41 @@ class BrowseDialog {
                     </div>
                     <div class="browse-item-badges">${privacyBadge}${mine}</div>
                     <sl-button size="small" variant="primary" class="browse-load-btn">Load</sl-button>
+                    ${item.is_mine ? '<sl-button size="small" variant="danger" class="browse-delete-btn" title="Delete"><i class="fas fa-trash"></i></sl-button>' : ''}
                 `;
             }
 
             row.querySelector('.browse-load-btn').addEventListener('click', () => this._loadItem(item));
+            if (item.is_mine) {
+                row.querySelector('.browse-delete-btn')?.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this._deleteItem(item);
+                });
+            }
             list.appendChild(row);
         });
+    }
+
+    _renderTaskMinimap(points) {
+        if (!points || points.length < 2) return '';
+        const W = 80, H = 55, pad = 5;
+        const lats = points.map(p => p.lat);
+        const lons = points.map(p => p.lon);
+        const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+        const minLon = Math.min(...lons), maxLon = Math.max(...lons);
+        const latR = maxLat - minLat || 0.01;
+        const lonR = maxLon - minLon || 0.01;
+        const toX = lon => pad + (lon - minLon) / lonR * (W - 2 * pad);
+        const toY = lat => (H - pad) - (lat - minLat) / latR * (H - 2 * pad);
+        const pathD = points.map((p, i) =>
+            `${i === 0 ? 'M' : 'L'}${toX(p.lon).toFixed(1)},${toY(p.lat).toFixed(1)}`
+        ).join(' ');
+        const dots = points.map((p, i) => {
+            const x = toX(p.lon).toFixed(1), y = toY(p.lat).toFixed(1);
+            const isEnd = i === 0 || i === points.length - 1;
+            return `<circle cx="${x}" cy="${y}" r="${isEnd ? 3 : 2}" fill="${isEnd ? '#e63946' : '#3b82f6'}"/>`;
+        }).join('');
+        return `<svg class="browse-item-minimap" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><path d="${pathD}" fill="none" stroke="#3b82f6" stroke-width="1.5" stroke-linejoin="round"/>${dots}</svg>`;
     }
 
     _renderPagination(total, page, perPage) {
@@ -167,6 +205,25 @@ class BrowseDialog {
         next.disabled = page >= totalPages;
         next.addEventListener('click', () => this._search(page + 1));
         el.appendChild(next);
+    }
+
+    async _deleteItem(item) {
+        const label = this.type === 'waypoints' ? 'waypoint file' : 'task';
+        const confirmed = await window.showConfirmModal(
+            `Delete "${item.name}"? This cannot be undone.`
+        );
+        if (!confirmed) return;
+
+        try {
+            const url = this.type === 'waypoints'
+                ? `/api/waypoints/files/${item.id}`
+                : `/api/tasks/${item.id}`;
+            const resp = await fetch(url, { method: 'DELETE' });
+            if (!resp.ok && resp.status !== 204) throw new Error(`Failed to delete ${label}.`);
+            this._search(this.currentPage);
+        } catch (err) {
+            window.app?.showStatus('Error: ' + err.message, 'error');
+        }
     }
 
     async _loadItem(item) {

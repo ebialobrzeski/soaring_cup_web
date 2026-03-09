@@ -76,17 +76,28 @@ def create_file(
     return wf
 
 
-def get_file(db: Session, user: User, file_id: str) -> Optional[WaypointFile]:
-    """Load a waypoint file owned by *user*. Returns None if not found / not owned."""
+def get_file(db: Session, user, file_id: str) -> Optional[WaypointFile]:
+    """Load a waypoint file.
+
+    Returns the file if it is owned by *user* OR if it is public.
+    *user* may be an anonymous Flask-Login user.
+    """
     try:
         fid = uuid.UUID(file_id)
     except (ValueError, AttributeError):
         return None
-    return (
-        db.query(WaypointFile)
-        .filter(WaypointFile.id == fid, WaypointFile.owner_id == user.id)
-        .first()
-    )
+
+    from sqlalchemy import or_
+    user_id = user.id if user and getattr(user, 'is_authenticated', False) else None
+
+    q = db.query(WaypointFile).filter(WaypointFile.id == fid)
+    if user_id:
+        q = q.filter(
+            or_(WaypointFile.owner_id == user_id, WaypointFile.is_public.is_(True))
+        )
+    else:
+        q = q.filter(WaypointFile.is_public.is_(True))
+    return q.first()
 
 
 def update_file(
@@ -156,16 +167,29 @@ def set_visibility(db: Session, user: User, file_id: str, is_public: bool) -> Wa
 
 
 def _replace_entries(db: Session, wf: WaypointFile, waypoints: list[dict]) -> None:
-    """Delete existing entries for *wf* and insert fresh ones from *waypoints*."""
+    """Delete existing entries for *wf* and insert fresh ones from *waypoints*.
+
+    Also computes and saves ``bbox`` and ``country_codes`` on *wf*.
+    """
     db.query(WaypointEntry).filter(WaypointEntry.file_id == wf.id).delete()
+    lats: list[float] = []
+    lons: list[float] = []
+    countries: set[str] = set()
     for order, wp in enumerate(waypoints):
+        lat = float(wp['latitude'])
+        lon = float(wp['longitude'])
+        lats.append(lat)
+        lons.append(lon)
+        c = str(wp.get('country', '')).strip()
+        if c:
+            countries.add(c.upper())
         entry = WaypointEntry(
             file_id=wf.id,
             name=str(wp.get('name', ''))[:255],
             code=str(wp.get('code', ''))[:50] or None,
             country=str(wp.get('country', ''))[:10] or None,
-            latitude=float(wp['latitude']),
-            longitude=float(wp['longitude']),
+            latitude=lat,
+            longitude=lon,
             elevation=_parse_elevation(wp.get('elevation')),
             style=int(wp.get('style', 1)),
             runway_direction=_parse_int(wp.get('runway_direction')),
@@ -176,6 +200,11 @@ def _replace_entries(db: Session, wf: WaypointFile, waypoints: list[dict]) -> No
             sort_order=order,
         )
         db.add(entry)
+    wf.bbox = (
+        {'minLat': min(lats), 'maxLat': max(lats), 'minLon': min(lons), 'maxLon': max(lons)}
+        if lats else None
+    )
+    wf.country_codes = ','.join(sorted(countries)) if countries else None
     db.flush()
 
 

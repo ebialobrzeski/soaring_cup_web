@@ -71,17 +71,9 @@
                 <sl-divider vertical></sl-divider>
                 <sl-icon-button name="moon" id="theme-toggle" label="Toggle theme"></sl-icon-button>
                 <sl-divider vertical></sl-divider>
-                <sl-tooltip placement="bottom-end" hoist>
-                    <div slot="content" style="text-align:center; padding:4px;">
-                        <img src="/static/images/qr-buymeacoffee.png" width="160" alt="Buy Me a Coffee QR" style="display:block; border-radius:6px;">
-                        <div style="margin-top:6px; font-size:0.75rem; opacity:0.8;">Scan to support ☕</div>
-                    </div>
-                    <a href="https://www.buymeacoffee.com/emil.b" target="_blank" rel="noopener noreferrer" class="header-support-btn">
-                        <sl-button variant="text" size="small">
-                            <sl-icon slot="prefix" name="cup-hot"></sl-icon> Like it? Buy me a coffee
-                        </sl-button>
-                    </a>
-                </sl-tooltip>
+                <a href="https://www.buymeacoffee.com/emil.b" target="_blank" rel="noopener noreferrer" title="Buy me a coffee" class="header-support-btn">
+                    <sl-icon-button name="cup-hot" label="Buy me a coffee"></sl-icon-button>
+                </a>
             </div>
         </header>
 
@@ -105,6 +97,7 @@
             <sl-tab slot="nav" panel="task"{% if view_mode %} active{% endif %}><i class="fas fa-route"></i> Task Planner</sl-tab>
             <sl-tab slot="nav" panel="ai-planner"><i class="fas fa-brain"></i> AI Planner</sl-tab>
             <sl-tab slot="nav" panel="admin" id="admin-tab" style="display:none"><i class="fas fa-shield-alt"></i> Admin</sl-tab>
+            <sl-tab slot="nav" panel="my-content" id="my-content-tab" style="display:none"><i class="fas fa-folder-open"></i> My Content</sl-tab>
 
             <!-- Map View -->
             <sl-tab-panel name="map">
@@ -126,9 +119,6 @@
                         </sl-button>
                         <sl-button id="browse-waypoints-btn" variant="default" data-auth-required style="display:none">
                             <i class="fas fa-search" slot="prefix"></i> Browse
-                        </sl-button>
-                        <sl-button id="my-files-btn" variant="default" data-auth-required style="display:none">
-                            <i class="fas fa-folder" slot="prefix"></i> My Files
                         </sl-button>
                     </sl-button-group>
                     <sl-divider vertical></sl-divider>
@@ -175,9 +165,6 @@
                                 </sl-button>
                                 <sl-button id="save-task-btn" variant="success" size="small" data-auth-required style="display:none">
                                     <i class="fas fa-cloud-upload-alt" slot="prefix"></i> Save Task
-                                </sl-button>
-                                <sl-button id="my-tasks-btn" variant="default" size="small" data-auth-required style="display:none">
-                                    <i class="fas fa-list" slot="prefix"></i> My Tasks
                                 </sl-button>
                                 {% if not view_mode %}
                                 <sl-button id="airspace-openaip-btn" variant="default" size="small" title="Fetch airspace from OpenAIP for current map view">
@@ -461,6 +448,14 @@
                                         <sl-input id="aip-glider" label="Glider" placeholder="Type to search gliders…" size="small" clearable autocomplete="off">
                                             <i class="fas fa-paper-plane" slot="prefix"></i>
                                         </sl-input>
+                                        <div class="aip-glider-actions">
+                                            <sl-button id="aip-glider-polar-btn" size="small" variant="neutral" style="display:none;" title="View polar curve">
+                                                <i class="fas fa-chart-line" slot="prefix"></i> Polar
+                                            </sl-button>
+                                            <sl-button id="aip-manage-gliders-btn" size="small" variant="neutral" data-auth-required style="display:none;">
+                                                <i class="fas fa-pencil-alt" slot="prefix"></i> My gliders
+                                            </sl-button>
+                                        </div>
                                         <div class="aip-ac-list" id="aip-glider-ac"></div>
                                         <input type="hidden" id="aip-glider-id" value="">
                                     </div>
@@ -473,11 +468,11 @@
                                     </sl-radio-group>
 
                                     <!-- Safety Profile -->
-                                    <sl-radio-group id="aip-safety" label="Safety profile" value="standard" fieldset>
-                                        <sl-radio-button value="conservative" size="small"><i class="fas fa-shield-alt"></i>&nbsp; Conservative</sl-radio-button>
-                                        <sl-radio-button value="standard" size="small"><i class="fas fa-balance-scale"></i>&nbsp; Standard</sl-radio-button>
-                                        <sl-radio-button value="aggressive" size="small"><i class="fas fa-bolt"></i>&nbsp; Aggressive</sl-radio-button>
-                                    </sl-radio-group>
+                                    <sl-select id="aip-safety" label="Safety profile" value="standard" size="small">
+                                        <sl-option value="conservative"><i class="fas fa-shield-alt"></i>&nbsp; Conservative</sl-option>
+                                        <sl-option value="standard"><i class="fas fa-balance-scale"></i>&nbsp; Standard</sl-option>
+                                        <sl-option value="aggressive"><i class="fas fa-bolt"></i>&nbsp; Aggressive</sl-option>
+                                    </sl-select>
 
                                     <!-- Airspace Constraints (collapsible) -->
                                     <sl-details summary="Airspace constraints" class="aip-constraints">
@@ -792,6 +787,97 @@
                     </sl-tab-group>
                 </div>
             </sl-tab-panel>
+
+            <!-- My Content panel -->
+            <sl-tab-panel name="my-content">
+                <div class="admin-panel">
+                    <div class="admin-header">
+                        <h2><i class="fas fa-folder-open"></i> My Content</h2>
+                    </div>
+
+                    <sl-tab-group id="my-content-tabs">
+                        <sl-tab slot="nav" panel="mc-files"><i class="fas fa-file-alt"></i> Waypoint Files <sl-badge id="mc-files-count" variant="neutral" pill style="margin-left:4px;">0</sl-badge></sl-tab>
+                        <sl-tab slot="nav" panel="mc-tasks"><i class="fas fa-route"></i> Tasks <sl-badge id="mc-tasks-count" variant="neutral" pill style="margin-left:4px;">0</sl-badge></sl-tab>
+                        <sl-tab slot="nav" panel="mc-gliders"><i class="fas fa-plane"></i> Custom Gliders <sl-badge id="mc-gliders-count" variant="neutral" pill style="margin-left:4px;">0</sl-badge></sl-tab>
+
+                        <!-- Waypoint Files -->
+                        <sl-tab-panel name="mc-files">
+                            <div class="admin-toolbar">
+                                <span style="flex:1; color:var(--text-secondary); font-size:.85rem;">Your saved waypoint files</span>
+                                <sl-button size="small" id="mc-files-refresh-btn" variant="default">
+                                    <i class="fas fa-sync-alt" slot="prefix"></i> Refresh
+                                </sl-button>
+                            </div>
+                            <div id="mc-files-loading" style="display:none; text-align:center; padding:20px;"><sl-spinner></sl-spinner></div>
+                            <div id="mc-files-error" class="admin-error" style="display:none;"></div>
+                            <div class="admin-table-wrap">
+                                <table class="admin-table">
+                                    <thead><tr>
+                                        <th>Name</th>
+                                        <th>Waypoints</th>
+                                        <th>Countries</th>
+                                        <th>Visibility</th>
+                                        <th>Saved</th>
+                                        <th>Actions</th>
+                                    </tr></thead>
+                                    <tbody id="mc-files-tbody"></tbody>
+                                </table>
+                            </div>
+                        </sl-tab-panel>
+
+                        <!-- Tasks -->
+                        <sl-tab-panel name="mc-tasks">
+                            <div class="admin-toolbar">
+                                <span style="flex:1; color:var(--text-secondary); font-size:.85rem;">Your saved tasks</span>
+                                <sl-button size="small" id="mc-tasks-refresh-btn" variant="default">
+                                    <i class="fas fa-sync-alt" slot="prefix"></i> Refresh
+                                </sl-button>
+                            </div>
+                            <div id="mc-tasks-loading" style="display:none; text-align:center; padding:20px;"><sl-spinner></sl-spinner></div>
+                            <div id="mc-tasks-error" class="admin-error" style="display:none;"></div>
+                            <div class="admin-table-wrap">
+                                <table class="admin-table">
+                                    <thead><tr>
+                                        <th>Name</th>
+                                        <th>Points</th>
+                                        <th>Distance</th>
+                                        <th>Visibility</th>
+                                        <th>Saved</th>
+                                        <th>Actions</th>
+                                    </tr></thead>
+                                    <tbody id="mc-tasks-tbody"></tbody>
+                                </table>
+                            </div>
+                        </sl-tab-panel>
+
+                        <!-- Custom Gliders -->
+                        <sl-tab-panel name="mc-gliders">
+                            <div class="admin-toolbar">
+                                <span style="flex:1; color:var(--text-secondary); font-size:.85rem;">Your custom glider polars</span>
+                                <sl-button size="small" id="mc-gliders-add-btn" variant="primary">
+                                    <i class="fas fa-plus" slot="prefix"></i> Add Glider
+                                </sl-button>
+                                <sl-button size="small" id="mc-gliders-refresh-btn" variant="default">
+                                    <i class="fas fa-sync-alt" slot="prefix"></i> Refresh
+                                </sl-button>
+                            </div>
+                            <div id="mc-gliders-loading" style="display:none; text-align:center; padding:20px;"><sl-spinner></sl-spinner></div>
+                            <div id="mc-gliders-error" class="admin-error" style="display:none;"></div>
+                            <div class="admin-table-wrap">
+                                <table class="admin-table">
+                                    <thead><tr>
+                                        <th>Name</th>
+                                        <th>Speed Range</th>
+                                        <th>Max Gross</th>
+                                        <th>Actions</th>
+                                    </tr></thead>
+                                    <tbody id="mc-gliders-tbody"></tbody>
+                                </table>
+                            </div>
+                        </sl-tab-panel>
+                    </sl-tab-group>
+                </div>
+            </sl-tab-panel>
         </sl-tab-group>
     </div>
 
@@ -900,11 +986,6 @@
         </div>
     </sl-dialog>
 
-    <!-- My Waypoint Files Dialog -->
-    <sl-dialog id="my-files-dialog" label="My Waypoint Files" style="--width: 600px;">
-        <div id="my-files-list" style="min-height:120px;"></div>
-    </sl-dialog>
-
     <!-- Save Task to Account Dialog -->
     <sl-dialog id="save-task-dialog" label="Save Task to Account" style="--width: 460px;">
         <div class="form-group" style="margin-bottom:14px;">
@@ -928,11 +1009,6 @@
             <sl-button variant="neutral" id="save-task-cancel">Cancel</sl-button>
             <sl-button variant="primary" id="save-task-submit"><i class="fas fa-save" slot="prefix"></i> Save</sl-button>
         </div>
-    </sl-dialog>
-
-    <!-- My Tasks Dialog -->
-    <sl-dialog id="my-tasks-dialog" label="My Saved Tasks" style="--width: 600px;">
-        <div id="my-tasks-list" style="min-height:120px;"></div>
     </sl-dialog>
 
     <!-- Browse Waypoints Dialog -->
@@ -965,6 +1041,62 @@
         <div id="browse-tasks-dialog-error" class="auth-error" style="display:none; color:var(--sl-color-danger-600); margin-bottom:8px;"></div>
         <div id="browse-tasks-dialog-results" class="browse-results-list"></div>
         <div id="browse-tasks-dialog-pagination" class="browse-pagination" style="display:flex; gap:8px; align-items:center; justify-content:center; margin-top:12px;"></div>
+    </sl-dialog>
+
+    <!-- Glider Polar Chart Dialog -->
+    <sl-dialog id="aip-polar-chart-dialog" label="Glider Polar Curve" style="--width: 500px;">
+        <div id="aip-polar-title" style="font-weight:600; font-size:1rem; margin-bottom:8px;"></div>
+        <canvas id="aip-polar-canvas" width="440" height="270" style="width:100%; border-radius:4px; border:1px solid var(--border);"></canvas>
+        <div id="aip-polar-info" style="margin-top:8px; font-size:0.82rem; color:var(--text-secondary);"></div>
+        <div slot="footer">
+            <sl-button variant="neutral" onclick="document.getElementById('aip-polar-chart-dialog').hide()">Close</sl-button>
+        </div>
+    </sl-dialog>
+
+    <!-- Custom Glider Management Dialog -->
+    <sl-dialog id="aip-custom-glider-dialog" label="My Custom Gliders" style="--width: 520px;">
+        <!-- Add/Edit form (hidden by default) -->
+        <div id="aip-glider-form-section" style="display:none; margin-bottom:16px;">
+            <div style="display:grid; grid-template-columns:1fr; gap:8px;">
+                <sl-input id="aip-glider-form-name" label="Glider name" size="small" placeholder="e.g. My LS8"></sl-input>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                    <sl-input id="aip-glider-form-v1" label="Speed 1 (km/h)" type="number" size="small" placeholder="80"></sl-input>
+                    <sl-input id="aip-glider-form-w1" label="Sink 1 (m/s)" type="number" step="0.01" size="small" placeholder="-0.60"></sl-input>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                    <sl-input id="aip-glider-form-v2" label="Speed 2 (km/h)" type="number" size="small" placeholder="120"></sl-input>
+                    <sl-input id="aip-glider-form-w2" label="Sink 2 (m/s)" type="number" step="0.01" size="small" placeholder="-0.85"></sl-input>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                    <sl-input id="aip-glider-form-v3" label="Speed 3 (km/h)" type="number" size="small" placeholder="200"></sl-input>
+                    <sl-input id="aip-glider-form-w3" label="Sink 3 (m/s)" type="number" step="0.01" size="small" placeholder="-3.0"></sl-input>
+                </div>
+                <sl-input id="aip-glider-form-max-gross" label="Max gross weight (kg)" type="number" size="small" placeholder="500"></sl-input>
+            </div>
+            <p style="font-size:0.78rem; color:var(--text-secondary); margin:6px 0 0;">
+                Enter three (speed, sink) calibration points used to fit the polar parabola.
+                Sink rates should be <strong>negative</strong> (e.g. -0.6).
+            </p>
+            <div id="aip-glider-form-error" style="color:var(--sl-color-danger-600); margin-top:6px; display:none;"></div>
+            <div style="display:flex; gap:8px; margin-top:12px; align-items:center;">
+                <sl-button id="aip-glider-save-btn" variant="primary" size="small">
+                    <i class="fas fa-save" slot="prefix"></i> Save
+                </sl-button>
+                <sl-button id="aip-glider-cancel-btn" variant="neutral" size="small">Cancel</sl-button>
+                <sl-button id="aip-glider-delete-btn" variant="danger" size="small" style="margin-left:auto; display:none;">
+                    <i class="fas fa-trash" slot="prefix"></i> Delete
+                </sl-button>
+            </div>
+            <sl-divider style="margin:14px 0 10px;"></sl-divider>
+        </div>
+        <!-- List of custom gliders -->
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <span style="font-weight:500; font-size:0.9rem;">Saved custom gliders</span>
+            <sl-button id="aip-glider-add-new-btn" size="small" variant="neutral">
+                <i class="fas fa-plus" slot="prefix"></i> Add new
+            </sl-button>
+        </div>
+        <div id="aip-custom-gliders-list" style="min-height:60px; display:flex; flex-direction:column; gap:6px;"></div>
     </sl-dialog>
 
     <!-- Waypoint Edit Dialog -->
@@ -1330,5 +1462,6 @@
     <script src="{{ url_for('static', filename='js/browse-dialog.js') }}"></script>
     <script src="{{ url_for('static', filename='js/ai-planner.js') }}"></script>
     <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/my-content.js') }}"></script>
 </body>
 </html>

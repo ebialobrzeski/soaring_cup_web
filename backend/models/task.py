@@ -34,6 +34,7 @@ class SavedTask(TimestampMixin, Base):
         nullable=True,
     )
     total_distance: Mapped[Optional[float]] = mapped_column(Numeric(8, 2), nullable=True)
+    bbox: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     def to_dict(self) -> dict:
         return {
@@ -45,6 +46,7 @@ class SavedTask(TimestampMixin, Base):
             'task_data': self.task_data,
             'waypoint_file_id': str(self.waypoint_file_id) if self.waypoint_file_id else None,
             'total_distance': float(self.total_distance) if self.total_distance else None,
+            'bbox': self.bbox,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }

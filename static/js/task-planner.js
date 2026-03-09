@@ -274,8 +274,6 @@ class TaskPlanner {
         // Account save/browse task buttons
         document.getElementById('browse-tasks-btn')?.addEventListener('click', () => window.taskBrowser?.open());
         document.getElementById('save-task-btn')?.addEventListener('click', () => this.showSaveTaskDialog());
-        document.getElementById('my-tasks-btn')?.addEventListener('click', () => this.showMyTasksDialog());
-
         // Save task dialog actions
         document.getElementById('save-task-cancel')?.addEventListener('click', () => document.getElementById('save-task-dialog').hide());
         document.getElementById('save-task-submit')?.addEventListener('click', () => this.handleSaveTaskSubmit());
@@ -1934,57 +1932,6 @@ class TaskPlanner {
         }
     }
 
-    async showMyTasksDialog() {
-        const dialog = document.getElementById('my-tasks-dialog');
-        const list = document.getElementById('my-tasks-list');
-        if (!dialog || !list) return;
-        list.innerHTML = '<p style="padding:.5rem">Loading…</p>';
-        dialog.show();
-        try {
-            const resp = await fetch('/api/tasks');
-            const data = await resp.json();
-            if (!resp.ok) { list.innerHTML = '<p style="padding:.5rem">Failed to load tasks.</p>'; return; }
-            const tasks = Array.isArray(data) ? data : (data.tasks || []);
-            if (!tasks.length) { list.innerHTML = '<p class="browse-empty">No saved tasks yet.</p>'; return; }
-            list.innerHTML = tasks.map(t => `
-                <div class="browse-item" data-id="${t.id}">
-                    <div class="browse-item-main">
-                        <span class="browse-item-name">${this.escapeHtml(t.name)}</span>
-                        <span class="browse-item-meta">${t.total_distance ? t.total_distance + ' km' : ''} · ${t.is_public ? 'Public' : 'Private'}</span>
-                    </div>
-                    <div style="display:flex;gap:.4rem;flex-shrink:0">
-                        <sl-button size="small" data-action="load-task" data-id="${t.id}">Load</sl-button>
-                        <sl-button size="small" variant="danger" data-action="delete-task" data-id="${t.id}">Delete</sl-button>
-                    </div>
-                </div>`).join('');
-            list.querySelectorAll('[data-action="load-task"]').forEach(btn => {
-                btn.addEventListener('click', () => this._loadTask(btn.dataset.id, dialog));
-            });
-            list.querySelectorAll('[data-action="delete-task"]').forEach(btn => {
-                btn.addEventListener('click', () => this._deleteTask(btn.dataset.id, list));
-            });
-        } catch {
-            list.innerHTML = '<p style="padding:.5rem">Network error.</p>';
-        }
-    }
-
-    async _loadTask(taskId, dialog) {
-        try {
-            const resp = await fetch(`/api/tasks/${taskId}`);
-            const data = await resp.json();
-            if (!resp.ok) return;
-            this.loadTaskData(data);
-            if (dialog) dialog.hide();
-        } catch { /* silent */ }
-    }
-
-    async _deleteTask(taskId, listEl) {
-        if (!await window.showConfirmModal('Delete this task?')) return;
-        try {
-            const resp = await fetch(`/api/tasks/${taskId}`, {method: 'DELETE'});
-            if (resp.ok) listEl.querySelector(`[data-action="delete-task"][data-id="${taskId}"]`)?.closest('.browse-item')?.remove();
-        } catch { /* silent */ }
-    }
 }
 
 // Global instance 
