@@ -35,5 +35,5 @@ services:
       - OPENAIP_API_KEY=${OPENAIP_API_KEY:-}
       - BASE_URL=${BASE_URL:-}
     depends_on:
-      postgres:
+      postgres_gliding:
         condition: service_healthy
