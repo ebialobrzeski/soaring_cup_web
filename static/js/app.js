@@ -552,7 +552,7 @@ class SoaringCupEditor {
         }
 
         try {
-            const response = await fetch(`/api/elevation/${lat}/${lon}`);
+            const response = await fetch(`/api/elevation?lat=${lat}&lon=${lon}`);
             const result = await response.json();
             
             if (result.success) {

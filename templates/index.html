@@ -71,9 +71,15 @@
                 <sl-divider vertical></sl-divider>
                 <sl-icon-button name="moon" id="theme-toggle" label="Toggle theme"></sl-icon-button>
                 <sl-divider vertical></sl-divider>
-                <a href="https://www.buymeacoffee.com/emil.b" target="_blank" rel="noopener noreferrer" title="Buy me a coffee" class="header-support-btn">
-                    <sl-icon-button name="cup-hot" label="Buy me a coffee"></sl-icon-button>
-                </a>
+                <sl-tooltip>
+                    <div slot="content" style="text-align:center">
+                        <img src="{{ url_for('static', filename='images/qr-buymeacoffee.png') }}" alt="Buy Me a Coffee QR" style="width:160px;display:block;margin-bottom:6px">
+                        <span>Scan to support ☕</span>
+                    </div>
+                    <a href="https://www.buymeacoffee.com/emil.b" target="_blank" rel="noopener noreferrer" class="header-support-btn">
+                        <sl-icon-button name="cup-hot" label="Buy me a coffee"></sl-icon-button>
+                    </a>
+                </sl-tooltip>
             </div>
         </header>
 

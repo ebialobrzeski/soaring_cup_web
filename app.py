@@ -233,10 +233,14 @@ def health_check():
 
 
 
-@app.route('/api/elevation/<float:lat>/<float:lon>', methods=['GET'])
-def fetch_elevation(lat, lon):
+@app.route('/api/elevation', methods=['GET'])
+def fetch_elevation():
     """Fetch elevation for given coordinates."""
     try:
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        if lat is None or lon is None:
+            return jsonify({'success': False, 'error': 'lat and lon query parameters are required'}), 400
         app.logger.info(f"Fetching elevation for {lat}, {lon}")
         elevation = get_elevation(lat, lon)
         app.logger.info(f"Elevation result: {elevation}m")
