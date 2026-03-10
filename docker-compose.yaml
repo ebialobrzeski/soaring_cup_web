@@ -34,6 +34,8 @@ services:
       - WINDY_API_KEY=${WINDY_API_KEY:-}
       - OPENAIP_API_KEY=${OPENAIP_API_KEY:-}
       - BASE_URL=${BASE_URL:-}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - RESEND_FROM_ADDRESS=${RESEND_FROM_ADDRESS:-noreply@glideplan.org}
     depends_on:
       postgres_gliding:
         condition: service_healthy
