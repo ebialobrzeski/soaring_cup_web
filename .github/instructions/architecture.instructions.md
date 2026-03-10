@@ -35,6 +35,10 @@ Never put business logic directly in `app.py`. Route handlers in `app.py` must s
 - Use **type hints** on all function signatures
 - Use **dataclasses or Pydantic models** for structured data passed between layers
 - Use **environment variables** via `backend/config.py` — never hardcode credentials or URLs
+- **When adding a new environment variable**, always do all three:
+  1. Add it to `backend/config.py` with `os.environ.get(...)`
+  2. Add it (with a placeholder value) to `.env.example`
+  3. Add it to the `glideplan` service `environment:` block in `docker-compose.yaml` using `${VAR_NAME:-default}` syntax — otherwise it will be silently missing in production
 - Prefer **explicit imports** over wildcard (`from module import *`)
 - Keep functions short: if a function exceeds ~30 lines, it likely has more than one responsibility
 
