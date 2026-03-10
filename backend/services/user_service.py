@@ -53,3 +53,9 @@ def set_user_tier(db: Session, email: str, new_tier: str) -> Optional[User]:
     user.tier = new_tier
     db.flush()
     return user
+
+
+def update_preferred_language(db: Session, user: User, lang_code: Optional[str]) -> None:
+    """Set or clear a user's preferred UI language."""
+    user.preferred_language = lang_code or None
+    db.flush()

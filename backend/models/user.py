@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, String, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,6 +31,15 @@ class User(TimestampMixin, Base):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default='TRUE')
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    preferred_language: Mapped[Optional[str]] = mapped_column(
+        String(10),
+        ForeignKey('languages.code', ondelete='SET NULL'),
+        nullable=True,
+    )
+    email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default='FALSE')
+    verification_code_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    verification_code_expires: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    verification_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default='0')
 
     def to_dict(self) -> dict:
         return {
@@ -39,6 +48,8 @@ class User(TimestampMixin, Base):
             'display_name': self.display_name,
             'tier': self.tier,
             'is_active': self.is_active,
+            'email_verified': self.email_verified,
+            'preferred_language': self.preferred_language,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'last_login_at': self.last_login_at.isoformat() if self.last_login_at else None,
         }

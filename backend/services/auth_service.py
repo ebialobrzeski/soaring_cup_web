@@ -1,10 +1,12 @@
 """Authentication and user-registration service."""
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
+import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -19,6 +21,16 @@ _EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
 class AuthError(Exception):
     """Raised for authentication/authorisation failures."""
+
+
+class EmailNotVerifiedError(AuthError):
+    """Raised when credentials are correct but the email is not yet verified."""
+    def __init__(self, email: str) -> None:
+        super().__init__('Email not verified.')
+        self.email = email
+
+
+_MAX_VERIFY_ATTEMPTS = 3
 
 
 def _validate_email(email: str) -> str:
@@ -56,6 +68,7 @@ def register_user(db: Session, email: str, display_name: str, password: str) -> 
         password_hash=generate_password_hash(password),
         tier='free',
         is_active=True,
+        email_verified=False,
     )
     db.add(user)
     db.flush()  # get the id without committing yet
@@ -63,14 +76,59 @@ def register_user(db: Session, email: str, display_name: str, password: str) -> 
     return user
 
 
+def generate_verification_code(db: Session, user: User) -> str:
+    """Generate a fresh 6-digit OTP, store its hash, and return the plaintext code."""
+    code = f'{secrets.randbelow(1_000_000):06d}'
+    user.verification_code_hash = hashlib.sha256(code.encode()).hexdigest()
+    user.verification_code_expires = datetime.now(timezone.utc) + timedelta(minutes=10)
+    user.verification_attempts = 0
+    db.flush()
+    return code
+
+
+def verify_email_code(db: Session, user: User, code: str) -> None:
+    """Validate the OTP. Sets email_verified=True on success. Raises AuthError on failure."""
+    if user.email_verified:
+        return  # already verified — idempotent
+
+    if not user.verification_code_hash or not user.verification_code_expires:
+        raise AuthError('code_invalid')
+
+    if datetime.now(timezone.utc) > user.verification_code_expires:
+        raise AuthError('code_expired')
+
+    if user.verification_attempts >= _MAX_VERIFY_ATTEMPTS:
+        raise AuthError('too_many_attempts')
+
+    submitted_hash = hashlib.sha256(code.encode()).hexdigest()
+    if not secrets.compare_digest(submitted_hash, user.verification_code_hash):
+        user.verification_attempts += 1
+        db.flush()
+        if user.verification_attempts >= _MAX_VERIFY_ATTEMPTS:
+            raise AuthError('too_many_attempts')
+        raise AuthError('code_invalid')
+
+    user.email_verified = True
+    user.verification_code_hash = None
+    user.verification_code_expires = None
+    user.verification_attempts = 0
+    user.last_login_at = datetime.now(timezone.utc)
+    db.flush()
+    logger.info('Email verified for user: %s', user.email)
+
+
 def authenticate(db: Session, email: str, password: str) -> Optional[User]:
-    """Return the User if credentials are valid, else None."""
+    """Return the User if credentials are valid, else None.
+    Raises EmailNotVerifiedError if the password is correct but email not verified.
+    """
     email = email.strip().lower()
     user = db.query(User).filter(User.email == email).first()
     if user is None or not user.is_active:
         return None
     if not check_password_hash(user.password_hash, password):
         return None
+    if not user.email_verified:
+        raise EmailNotVerifiedError(user.email)
 
     user.last_login_at = datetime.now(timezone.utc)
     db.flush()

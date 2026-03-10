@@ -111,7 +111,14 @@ class BrowseDialog {
                           .map(c => `<sl-badge variant="neutral" pill>${escapeHtml(c.trim())}</sl-badge>`)
                           .join('')
                     : '';
+                const minimap = this._renderWaypointMinimap(item.bbox);
+                const bbox = item.bbox;
+                const bboxStr = (bbox && bbox.min_lat != null)
+                    ? `${bbox.min_lat.toFixed(2)}\u00b0\u2013${bbox.max_lat.toFixed(2)}\u00b0 N, ${bbox.min_lon.toFixed(2)}\u00b0\u2013${bbox.max_lon.toFixed(2)}\u00b0 E`
+                    : '';
+                const hasDetails = !!(bboxStr || item.description);
                 row.innerHTML = `
+                    ${minimap}
                     <div class="browse-item-main">
                         <div class="browse-item-name">${escapeHtml(item.name)}</div>
                         <div class="browse-item-meta">
@@ -123,12 +130,20 @@ class BrowseDialog {
                         ${item.description ? `<div class="browse-item-desc">${escapeHtml(item.description)}</div>` : ''}
                     </div>
                     <div class="browse-item-badges">${privacyBadge}${mine}</div>
+                    ${hasDetails ? '<button class="browse-info-btn" title="Show details"><i class="fas fa-info-circle"></i></button>' : ''}
                     <sl-button size="small" variant="primary" class="browse-load-btn">Load</sl-button>
                     ${item.is_mine ? '<sl-button size="small" variant="danger" class="browse-delete-btn" title="Delete"><i class="fas fa-trash"></i></sl-button>' : ''}
+                    ${hasDetails ? `<div class="browse-item-details" style="display:none">
+                        ${bboxStr ? `<span class="browse-detail-item"><i class="fas fa-expand-arrows-alt"></i> ${escapeHtml(bboxStr)}</span>` : ''}
+                        ${item.description ? `<span class="browse-detail-item browse-detail-desc">${escapeHtml(item.description)}</span>` : ''}
+                    </div>` : ''}
                 `;
             } else {
-                const dist = item.total_distance ? `${item.total_distance.toFixed(1)} km` : '—';
+                const dist = item.total_distance ? `${item.total_distance.toFixed(1)} km` : '\u2014';
                 const minimap = this._renderTaskMinimap(item.points);
+                const pointsHtml = item.points.length
+                    ? item.points.map((p, i) => `<li>${escapeHtml(p.name || '?')}</li>`).join('')
+                    : '';
                 row.innerHTML = `
                     ${minimap}
                     <div class="browse-item-main">
@@ -142,12 +157,23 @@ class BrowseDialog {
                         ${item.description ? `<div class="browse-item-desc">${escapeHtml(item.description)}</div>` : ''}
                     </div>
                     <div class="browse-item-badges">${privacyBadge}${mine}</div>
+                    ${pointsHtml ? '<button class="browse-info-btn" title="Show waypoints"><i class="fas fa-info-circle"></i></button>' : ''}
                     <sl-button size="small" variant="primary" class="browse-load-btn">Load</sl-button>
                     ${item.is_mine ? '<sl-button size="small" variant="danger" class="browse-delete-btn" title="Delete"><i class="fas fa-trash"></i></sl-button>' : ''}
+                    ${pointsHtml ? `<div class="browse-item-details" style="display:none"><ol class="browse-points-list">${pointsHtml}</ol></div>` : ''}
                 `;
             }
 
             row.querySelector('.browse-load-btn').addEventListener('click', () => this._loadItem(item));
+            row.querySelector('.browse-info-btn')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const details = row.querySelector('.browse-item-details');
+                if (details) {
+                    const visible = details.style.display !== 'none';
+                    details.style.display = visible ? 'none' : 'block';
+                    e.currentTarget.classList.toggle('active', !visible);
+                }
+            });
             if (item.is_mine) {
                 row.querySelector('.browse-delete-btn')?.addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -156,6 +182,28 @@ class BrowseDialog {
             }
             list.appendChild(row);
         });
+    }
+
+    _renderWaypointMinimap(bbox) {
+        if (!bbox || bbox.min_lat == null || bbox.max_lat == null) return '';
+        const W = 80, H = 55, pad = 4;
+        // European context bounds — covers the main soaring areas
+        const ctxMinLat = 30, ctxMaxLat = 72, ctxMinLon = -25, ctxMaxLon = 50;
+        const latR = ctxMaxLat - ctxMinLat;
+        const lonR = ctxMaxLon - ctxMinLon;
+        const toX = lon => pad + (lon - ctxMinLon) / lonR * (W - 2 * pad);
+        const toY = lat => (H - pad) - (lat - ctxMinLat) / latR * (H - 2 * pad);
+        const x1 = Math.max(pad, toX(bbox.min_lon)).toFixed(1);
+        const y1 = Math.max(pad, toY(bbox.max_lat)).toFixed(1);
+        const x2 = Math.min(W - pad, toX(bbox.max_lon)).toFixed(1);
+        const y2 = Math.min(H - pad, toY(bbox.min_lat)).toFixed(1);
+        const rw = Math.max(3, x2 - x1).toFixed(1);
+        const rh = Math.max(3, y2 - y1).toFixed(1);
+        return `<svg class="browse-item-minimap" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
+            <rect x="0" y="0" width="${W}" height="${H}" rx="3" fill="#1e293b" stroke="none"/>
+            <rect x="${x1}" y="${y1}" width="${rw}" height="${rh}"
+                  fill="rgba(59,130,246,0.35)" stroke="#3b82f6" stroke-width="1.5" rx="1"/>
+        </svg>`;
     }
 
     _renderTaskMinimap(points) {
@@ -175,7 +223,8 @@ class BrowseDialog {
         const dots = points.map((p, i) => {
             const x = toX(p.lon).toFixed(1), y = toY(p.lat).toFixed(1);
             const isEnd = i === 0 || i === points.length - 1;
-            return `<circle cx="${x}" cy="${y}" r="${isEnd ? 3 : 2}" fill="${isEnd ? '#e63946' : '#3b82f6'}"/>`;
+            const title = p.name ? `<title>${escapeHtml(p.name)}</title>` : '';
+            return `<circle cx="${x}" cy="${y}" r="${isEnd ? 3 : 2}" fill="${isEnd ? '#e63946' : '#3b82f6'}">${title}</circle>`;
         }).join('');
         return `<svg class="browse-item-minimap" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><path d="${pathD}" fill="none" stroke="#3b82f6" stroke-width="1.5" stroke-linejoin="round"/>${dots}</svg>`;
     }

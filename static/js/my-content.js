@@ -43,6 +43,7 @@ class MyContentPanel {
             if (e.detail.name === 'mc-files' && !this._filesLoaded) this._loadFiles();
             if (e.detail.name === 'mc-tasks' && !this._tasksLoaded) this._loadTasks();
             if (e.detail.name === 'mc-gliders' && !this._glidersLoaded) this._loadGliders();
+            if (e.detail.name === 'mc-settings') this._loadSettings();
         });
 
         document.getElementById('mc-files-refresh-btn')?.addEventListener('click', () => {
@@ -62,6 +63,74 @@ class MyContentPanel {
         document.getElementById('mc-gliders-add-btn')?.addEventListener('click', () => {
             window.aiPlanner?._openManageGlidersDialog();
         });
+
+        document.getElementById('mc-settings-save-btn')?.addEventListener('click', () => {
+            this._saveLanguagePreference();
+        });
+    }
+
+    // ── Settings ─────────────────────────────────────────────────────────────
+
+    _loadSettings() {
+        const sel = document.getElementById('mc-lang-pref');
+        if (!sel) return;
+        const populate = async (languages) => {
+            sel.innerHTML = '';
+            // Add a 'use browser default' option
+            const defaultOpt = document.createElement('sl-option');
+            defaultOpt.value = '';
+            defaultOpt.textContent = '— ' + (window.i18n?.t('mc.language_pref_default', 'Browser default') || 'Browser default') + ' —';
+            sel.appendChild(defaultOpt);
+            languages.forEach(lang => {
+                const opt = document.createElement('sl-option');
+                opt.value = lang.code;
+                opt.textContent = `${lang.flag_emoji || ''} ${lang.native_name}`.trim();
+                sel.appendChild(opt);
+            });
+            const preferred = window.authManager?.currentUser?.preferred_language || '';
+            // Wait for sl-select to process its new children before setting value
+            try { await sel.updateComplete; } catch (_) { /* not a Lit component */ }
+            sel.value = preferred;
+        };
+
+        // Try to get language list from i18n module internals, fall back to fetch
+        fetch('/api/i18n/languages')
+            .then(r => r.json())
+            .then(data => { if (data.success) populate(data.languages); })
+            .catch(() => {});
+    }
+
+    async _saveLanguagePreference() {
+        const sel = document.getElementById('mc-lang-pref');
+        const statusEl = document.getElementById('mc-settings-msg');
+        if (!sel) return;
+        const langCode = sel.value || null;
+        try {
+            const resp = await fetch('/auth/me/language', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lang_code: langCode }),
+            });
+            if (!resp.ok) {
+                const d = await resp.json();
+                window.app?.showStatus(d.error || 'Failed to save language preference.', 'error');
+                return;
+            }
+            // Update the in-memory user object
+            if (window.authManager?.currentUser) {
+                window.authManager.currentUser.preferred_language = langCode;
+            }
+            // Apply the language immediately
+            const applyLang = langCode || window.i18n?.currentLang || 'en';
+            await window.i18n?.setLanguage(applyLang);
+            if (statusEl) {
+                statusEl.textContent = window.i18n?.t('mc.settings_saved', 'Settings saved!');
+                statusEl.style.display = '';
+                setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
+            }
+        } catch {
+            window.app?.showStatus('Network error saving language preference.', 'error');
+        }
     }
 
     // ── Waypoint Files ──────────────────────────────────────────────────────

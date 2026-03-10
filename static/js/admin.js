@@ -92,7 +92,7 @@ class AdminPanel {
         if (!tbody) return;
 
         if (!users.length) {
-            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:20px; color:var(--text-secondary);">No users found.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:20px; color:var(--text-secondary);">No users found.</td></tr>';
             return;
         }
 
@@ -107,6 +107,10 @@ class AdminPanel {
                 ? '<sl-badge variant="success" pill>Active</sl-badge>'
                 : '<sl-badge variant="warning" pill>Disabled</sl-badge>';
 
+            const verifiedBadge = u.email_verified
+                ? '<sl-badge variant="success" pill><i class="fas fa-check"></i></sl-badge>'
+                : '<sl-badge variant="neutral" pill><i class="fas fa-clock"></i></sl-badge>';
+
             const registered = u.created_at ? new Date(u.created_at).toLocaleDateString() : '—';
 
             return `<tr data-user-id="${escapeHtml(u.id)}">
@@ -114,6 +118,7 @@ class AdminPanel {
                 <td>${escapeHtml(u.display_name)}</td>
                 <td>${tierBadge}</td>
                 <td>${activeBadge}</td>
+                <td>${verifiedBadge}</td>
                 <td>${u.file_count}</td>
                 <td>${u.task_count}</td>
                 <td>${registered}</td>

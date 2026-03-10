@@ -52,10 +52,16 @@ class SoaringCupEditor {
         if (window.VIEW_MODE) {
             const nameInput = document.getElementById('task-name');
             if (nameInput) nameInput.readOnly = true;
-            // Init task map after Shoelace has fully upgraded the tab group
+            // Init task map after Shoelace has fully upgraded the tab group.
+            // Use a shorter initial delay, then force additional invalidateSize calls
+            // so Leaflet always recalculates after the panel CSS transition finishes.
             setTimeout(() => {
-                if (window.taskPlanner) window.taskPlanner.initMap();
-            }, 500);
+                if (window.taskPlanner) {
+                    window.taskPlanner.initMap();
+                    setTimeout(() => window.taskPlanner?.map?.invalidateSize(true), 200);
+                    setTimeout(() => window.taskPlanner?.map?.invalidateSize(true), 500);
+                }
+            }, 300);
         }
     }
 
@@ -79,7 +85,11 @@ class SoaringCupEditor {
                 setTimeout(() => this.map.invalidateSize(), 100);
             }
             if (panel === 'task' && window.taskPlanner) {
-                setTimeout(() => window.taskPlanner.initMap(), 100);
+                setTimeout(() => {
+                    window.taskPlanner.initMap();
+                    // Extra invalidation after Shoelace panel CSS transition completes (~300ms)
+                    setTimeout(() => window.taskPlanner?.map?.invalidateSize(true), 350);
+                }, 100);
             }
             if (panel === 'ai-planner') {
                 this._updateAiPlannerPanel();
@@ -305,7 +315,9 @@ class SoaringCupEditor {
         const modal = document.getElementById('waypoint-modal');
         const form = document.getElementById('waypoint-form');
 
-        modal.label = waypoint ? 'Edit Waypoint' : 'Add Waypoint';
+        modal.label = waypoint
+            ? window.i18n.t('wp.edit_title', 'Edit Waypoint')
+            : window.i18n.t('wp.add_title', 'Add Waypoint');
         
         // Reset form and switch to first tab
         form.reset();
@@ -943,12 +955,15 @@ class SoaringCupEditor {
         // Helper function to check if field has meaningful value
         const hasValue = (field) => field && field.toString().trim() !== '';
 
+        const i18n = window.i18n || { t: (k, fb) => fb !== undefined ? fb : k };
+
         // Build information sections
+        const displayName = waypoint.name || waypoint.code || '—';
         let basicInfo = `
             <div class="popup-section">
-                <h4 class="popup-title">${this.escapeHtml(waypoint.name)}</h4>
+                <h4 class="popup-title" style="color:var(--sl-color-neutral-900); word-break:break-word;">${this.escapeHtml(displayName)}</h4>
                 <div class="popup-field">
-                    <span class="field-label">Type:</span>
+                    <span class="field-label">${i18n.t('popup.type', 'Type')}:</span>
                     <span class="field-value">${styleInfo.name} (${waypoint.style || 1})</span>
                 </div>
             </div>
@@ -959,16 +974,16 @@ class SoaringCupEditor {
         if (hasValue(waypoint.code) || hasValue(waypoint.country)) {
             identificationSection = `
                 <div class="popup-section">
-                    <h5 class="popup-section-title">Identification</h5>
+                    <h5 class="popup-section-title">${i18n.t('popup.identification', 'Identification')}</h5>
                     ${hasValue(waypoint.code) ? `
                         <div class="popup-field">
-                            <span class="field-label">Code:</span>
+                            <span class="field-label">${i18n.t('tbl.code', 'Code')}:</span>
                             <span class="field-value">${this.escapeHtml(waypoint.code)}</span>
                         </div>
                     ` : ''}
                     ${hasValue(waypoint.country) ? `
                         <div class="popup-field">
-                            <span class="field-label">Country:</span>
+                            <span class="field-label">${i18n.t('tbl.country', 'Country')}:</span>
                             <span class="field-value">${this.escapeHtml(waypoint.country)}</span>
                         </div>
                     ` : ''}
@@ -979,22 +994,22 @@ class SoaringCupEditor {
         // Position section (always present)
         let positionSection = `
             <div class="popup-section">
-                <h5 class="popup-section-title">Position</h5>
+                <h5 class="popup-section-title">${i18n.t('popup.position', 'Position')}</h5>
                 <div class="popup-field">
-                    <span class="field-label">Latitude:</span>
+                    <span class="field-label">${i18n.t('tbl.latitude', 'Latitude')}:</span>
                     <span class="field-value">${formatCoordinate(waypoint.latitude, 'lat')}</span>
                 </div>
                 <div class="popup-field">
-                    <span class="field-label">Longitude:</span>
+                    <span class="field-label">${i18n.t('tbl.longitude', 'Longitude')}:</span>
                     <span class="field-value">${formatCoordinate(waypoint.longitude, 'lon')}</span>
                 </div>
                 <div class="popup-field">
-                    <span class="field-label">Decimal:</span>
+                    <span class="field-label">${i18n.t('popup.decimal', 'Decimal')}:</span>
                     <span class="field-value">${waypoint.latitude.toFixed(6)}, ${waypoint.longitude.toFixed(6)}</span>
                 </div>
                 ${hasValue(waypoint.elevation) ? `
                     <div class="popup-field">
-                        <span class="field-label">Elevation:</span>
+                        <span class="field-label">${i18n.t('tbl.elevation', 'Elevation')}:</span>
                         <span class="field-value">${this.escapeHtml(waypoint.elevation)} m</span>
                     </div>
                 ` : ''}
@@ -1007,28 +1022,28 @@ class SoaringCupEditor {
             hasValue(waypoint.runway_width) || hasValue(waypoint.frequency)) {
             airfieldSection = `
                 <div class="popup-section">
-                    <h5 class="popup-section-title">Airfield Information</h5>
+                    <h5 class="popup-section-title">${i18n.t('popup.airfield_info', 'Airfield Information')}</h5>
                     ${hasValue(waypoint.runway_direction) ? `
                         <div class="popup-field">
-                            <span class="field-label">Runway Direction:</span>
+                            <span class="field-label">${i18n.t('popup.runway_direction', 'Runway Direction')}:</span>
                             <span class="field-value">${this.escapeHtml(waypoint.runway_direction)}</span>
                         </div>
                     ` : ''}
                     ${hasValue(waypoint.runway_length) ? `
                         <div class="popup-field">
-                            <span class="field-label">Runway Length:</span>
+                            <span class="field-label">${i18n.t('popup.runway_length', 'Runway Length')}:</span>
                             <span class="field-value">${this.escapeHtml(waypoint.runway_length)} m</span>
                         </div>
                     ` : ''}
                     ${hasValue(waypoint.runway_width) ? `
                         <div class="popup-field">
-                            <span class="field-label">Runway Width:</span>
+                            <span class="field-label">${i18n.t('popup.runway_width', 'Runway Width')}:</span>
                             <span class="field-value">${this.escapeHtml(waypoint.runway_width)} m</span>
                         </div>
                     ` : ''}
                     ${hasValue(waypoint.frequency) ? `
                         <div class="popup-field">
-                            <span class="field-label">Radio Frequency:</span>
+                            <span class="field-label">${i18n.t('popup.radio_frequency', 'Radio Frequency')}:</span>
                             <span class="field-value">${this.escapeHtml(waypoint.frequency)} MHz</span>
                         </div>
                     ` : ''}
@@ -1041,7 +1056,7 @@ class SoaringCupEditor {
         if (hasValue(waypoint.description)) {
             descriptionSection = `
                 <div class="popup-section">
-                    <h5 class="popup-section-title">Description</h5>
+                    <h5 class="popup-section-title">${i18n.t('popup.description', 'Description')}</h5>
                     <div class="popup-description">
                         ${this.escapeHtml(waypoint.description)}
                     </div>

@@ -557,7 +557,6 @@ class AiPlanner {
                 exclude_restricted: checked('aip-exclude-restricted'),
                 exclude_danger: checked('aip-exclude-danger'),
                 exclude_prohibited: true, // always
-                allow_border_crossing: checked('aip-allow-border-crossing'),
                 exclude_classes: excludeClasses,
             },
         };
@@ -966,7 +965,6 @@ class AiPlanner {
                 this._setChecked('aip-exclude-flightplan', inputs.constraints.exclude_flight_plan);
                 this._setChecked('aip-exclude-restricted', inputs.constraints.exclude_restricted);
                 this._setChecked('aip-exclude-danger', inputs.constraints.exclude_danger);
-                this._setChecked('aip-allow-border-crossing', inputs.constraints.allow_border_crossing);
                 const cls = inputs.constraints.exclude_classes || [];
                 this._setChecked('aip-exclude-C', cls.includes('C'));
                 this._setChecked('aip-exclude-D', cls.includes('D'));

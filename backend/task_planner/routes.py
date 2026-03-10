@@ -629,7 +629,6 @@ def generate_task():
                 return None
 
         # ── 3. Optimize routes ────────────────────────────────────────────
-        allow_border = bool(constraints and constraints.get("allow_border_crossing", False))
         top_candidates = optimize_task(
             takeoff["lat"], takeoff["lon"],
             target_km,
@@ -639,7 +638,6 @@ def generate_task():
             soaring_mode=soaring_mode,
             safety_profile=safety_profile,
             airspace_checker=_check_route_airspace,
-            allow_border_crossing=allow_border,
         )
         g._aip_external_calls["candidates"] = len(top_candidates)
 

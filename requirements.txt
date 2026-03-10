@@ -31,3 +31,6 @@ numpy>=1.24
 # QR Code Generation (XCTask format)
 qrcode[pil]>=7.4
 Pillow>=10.0
+
+# Email delivery
+resend>=2.0

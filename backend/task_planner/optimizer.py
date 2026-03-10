@@ -80,67 +80,6 @@ class CandidateRoute:
 # Geometry helpers
 # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Poland border geofence (simplified polygon — keeps routes inside Poland)
-# This is a conservative approximation: points slightly inside the real border.
-# Prevents routes from crossing into Belarus, Russia (Kaliningrad), Lithuania,
-# Ukraine, Slovakia, Czech Republic, Germany, or over the Baltic Sea.
-# ---------------------------------------------------------------------------
-
-_POLAND_BORDER: list[tuple[float, float]] = [
-    # (lat, lon) — clockwise from NW corner
-    (54.83, 14.12),   # NW — Swinoujscie / Usedom
-    (54.45, 16.20),   # N coast — Słupsk area
-    (54.79, 18.40),   # N coast — Gdańsk Bay
-    (54.38, 19.60),   # NE — Vistula Lagoon
-    (54.35, 22.80),   # NE — near Suwałki
-    (53.85, 23.55),   # E — north of Białystok (Poland/Belarus border)
-    (52.70, 23.60),   # E — Biała Podlaska area
-    (51.95, 23.65),   # E — Chełm area
-    (51.25, 23.60),   # E — south of Lublin
-    (50.85, 24.10),   # SE corner — near Hrubieszów
-    (50.35, 23.50),   # SE — Zamość area
-    (49.55, 22.70),   # S — Bieszczady
-    (49.40, 22.15),   # S — Bieszczady west
-    (49.30, 20.95),   # S — Tatry east
-    (49.20, 20.05),   # S — Tatry center
-    (49.45, 18.85),   # S — Żywiec
-    (49.95, 18.30),   # S — Cieszyn
-    (50.30, 16.30),   # SW — Kłodzko
-    (50.35, 15.00),   # W — Jelenia Góra
-    (51.05, 14.95),   # W — Zgorzelec
-    (51.50, 14.70),   # W — south of Żary
-    (51.80, 14.70),   # W — Gubin
-    (52.35, 14.55),   # W — Słubice
-    (52.75, 14.40),   # W — Kostrzyn
-    (53.15, 14.25),   # NW — Szczecin area
-    (53.85, 14.20),   # NW — north of Szczecin
-    (54.83, 14.12),   # close polygon
-]
-
-
-def _point_in_polygon(lat: float, lon: float, polygon: list[tuple[float, float]]) -> bool:
-    """Ray-casting point-in-polygon test."""
-    n = len(polygon)
-    inside = False
-    j = n - 1
-    for i in range(n):
-        yi, xi = polygon[i]
-        yj, xj = polygon[j]
-        if ((yi > lat) != (yj > lat)) and (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi):
-            inside = not inside
-        j = i
-    return inside
-
-
-def _route_inside_poland(points: list[tuple[float, float]]) -> bool:
-    """Check that ALL route points are inside Poland border polygon."""
-    for lat, lon in points:
-        if not _point_in_polygon(lat, lon, _POLAND_BORDER):
-            return False
-    return True
-
-
 def _max_distance_from_home(
     points: list[tuple[float, float]],
     home_lat: float,
@@ -306,7 +245,6 @@ def generate_candidates(
     dest_lat: Optional[float] = None,
     dest_lon: Optional[float] = None,
     soaring_mode: str = "thermal",
-    allow_border_crossing: bool = False,
 ) -> list[list[tuple[float, float]]]:
     """Generate all candidate turnpoint sets.
 
@@ -331,16 +269,6 @@ def generate_candidates(
             _generate_sector_routes(takeoff_lat, takeoff_lon, dest_lat, dest_lon, target_km, 12)
         )
         candidates.extend(_generate_triangles(takeoff_lat, takeoff_lon, target_km, 8))
-
-    # Hard filter: remove any route with waypoints outside Poland
-    if not allow_border_crossing:
-        before = len(candidates)
-        candidates = [c for c in candidates if _route_inside_poland(c)]
-        removed = before - len(candidates)
-        if removed:
-            logger.info("Geofence: removed %d/%d candidates outside Poland border", removed, before)
-    else:
-        logger.info("Geofence: DISABLED — border crossing allowed by user")
 
     return candidates
 
@@ -542,7 +470,6 @@ def optimize_task(
     airspace_result: Optional[dict] = None,
     airspace_checker=None,
     terrain_checker=None,
-    allow_border_crossing: bool = False,
     top_n: int = 5,
 ) -> list[CandidateRoute]:
     """Generate and score candidate routes, return top N.
@@ -563,7 +490,6 @@ def optimize_task(
         takeoff_lat, takeoff_lon, target_km,
         dest_lat=dest_lat, dest_lon=dest_lon,
         soaring_mode=soaring_mode,
-        allow_border_crossing=allow_border_crossing,
     )
     n_oar = sum(1 for c in raw_candidates if len(c) == 3 and c[0] == c[2])
     n_tri = sum(1 for c in raw_candidates if len(c) >= 4 and c[0] == c[-1])

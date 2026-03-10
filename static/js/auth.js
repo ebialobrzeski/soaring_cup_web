@@ -60,6 +60,17 @@ class AuthManager {
         // Register form submit
         const registerForm = document.getElementById('register-form');
         if (registerForm) registerForm.addEventListener('submit', (e) => this._handleRegisterSubmit(e));
+
+        // Verify email dialog
+        const verifyBtn = document.getElementById('verify-submit-btn');
+        if (verifyBtn) verifyBtn.addEventListener('click', () => this._handleVerifySubmit());
+        document.getElementById('verify-code-input')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') this._handleVerifySubmit();
+        });
+        document.getElementById('verify-resend-link')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this._handleResendCode();
+        });
     }
 
     // ── API calls ─────────────────────────────────────────────────────────────
@@ -89,6 +100,7 @@ class AuthManager {
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || 'Login failed.');
+        if (data.requires_verification) return data;  // don't set currentUser yet
         this.currentUser = data.user;
         this.limits = data.limits;
         return data;
@@ -102,6 +114,20 @@ class AuthManager {
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || 'Registration failed.');
+        if (data.requires_verification) return data;  // don't set currentUser yet
+        this.currentUser = data.user;
+        this.limits = data.limits;
+        return data;
+    }
+
+    async verifyEmail(email, code) {
+        const resp = await fetch('/auth/verify-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, code }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Verification failed.');
         this.currentUser = data.user;
         this.limits = data.limits;
         return data;
@@ -178,6 +204,23 @@ class AuthManager {
         if (dlg) dlg.hide();
     }
 
+    showVerifyDialog(email) {
+        this._pendingVerifyEmail = email;
+        const dlg = document.getElementById('verify-email-dialog');
+        if (!dlg) return;
+        const addrEl = document.getElementById('verify-email-addr');
+        if (addrEl) addrEl.textContent = email;
+        document.getElementById('verify-error')?.style.setProperty('display', 'none');
+        const input = document.getElementById('verify-code-input');
+        if (input) input.value = '';
+        dlg.show();
+        setTimeout(() => input?.focus(), 150);
+    }
+
+    hideVerifyDialog() {
+        document.getElementById('verify-email-dialog')?.hide();
+    }
+
     // ── form handlers ─────────────────────────────────────────────────────────
 
     async _handleLoginSubmit(e) {
@@ -189,10 +232,19 @@ class AuthManager {
 
         this._setButtonLoading(submitBtn, true);
         try {
-            await this.login(email, password);
+            const data = await this.login(email, password);
+            if (data.requires_verification) {
+                this.hideLoginDialog();
+                this.showVerifyDialog(data.email);
+                return;
+            }
             this.hideLoginDialog();
             this.updateHeaderUI();
             this._notifyAuthChange();
+            // Apply user's preferred language if set
+            if (data.user?.preferred_language) {
+                window.i18n?.setLanguage(data.user.preferred_language);
+            }
             this._promptSessionMigration();
         } catch (err) {
             if (errorEl) { errorEl.textContent = err.message; errorEl.style.display = ''; }
@@ -217,15 +269,74 @@ class AuthManager {
 
         this._setButtonLoading(submitBtn, true);
         try {
-            await this.register(email, displayName, password);
+            const data = await this.register(email, displayName, password);
+            if (data.requires_verification) {
+                this.hideRegisterDialog();
+                this.showVerifyDialog(data.email);
+                return;
+            }
             this.hideRegisterDialog();
             this.updateHeaderUI();
             this._notifyAuthChange();
+            if (data.user?.preferred_language) {
+                window.i18n?.setLanguage(data.user.preferred_language);
+            }
             this._promptSessionMigration();
         } catch (err) {
             if (errorEl) { errorEl.textContent = err.message; errorEl.style.display = ''; }
         } finally {
             this._setButtonLoading(submitBtn, false);
+        }
+    }
+
+    async _handleVerifySubmit() {
+        const code = (document.getElementById('verify-code-input')?.value || '').trim();
+        const errorEl = document.getElementById('verify-error');
+        const submitBtn = document.getElementById('verify-submit-btn');
+
+        if (!code || code.length !== 6) {
+            if (errorEl) { errorEl.textContent = 'Please enter the 6-digit code.'; errorEl.style.display = ''; }
+            return;
+        }
+
+        this._setButtonLoading(submitBtn, true);
+        try {
+            const data = await this.verifyEmail(this._pendingVerifyEmail, code);
+            this.hideVerifyDialog();
+            this.updateHeaderUI();
+            this._notifyAuthChange();
+            if (data.user?.preferred_language) {
+                window.i18n?.setLanguage(data.user.preferred_language);
+            }
+            this._promptSessionMigration();
+        } catch (err) {
+            // Map error keys to translated messages
+            const key = `auth.${err.message}`;
+            const msg = window.i18n?.t(key, null);
+            if (errorEl) { errorEl.textContent = msg || err.message; errorEl.style.display = ''; }
+        } finally {
+            this._setButtonLoading(submitBtn, false);
+        }
+    }
+
+    async _handleResendCode() {
+        const resendLink = document.getElementById('verify-resend-link');
+        if (resendLink) resendLink.style.pointerEvents = 'none';
+        try {
+            await fetch('/auth/resend-code', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: this._pendingVerifyEmail }),
+            });
+            const errorEl = document.getElementById('verify-error');
+            if (errorEl) {
+                errorEl.style.color = 'var(--sl-color-success-600)';
+                errorEl.textContent = 'A new code has been sent.';
+                errorEl.style.display = '';
+                setTimeout(() => { errorEl.style.display = 'none'; errorEl.style.color = ''; }, 4000);
+            }
+        } finally {
+            setTimeout(() => { if (resendLink) resendLink.style.pointerEvents = ''; }, 30000);
         }
     }
 

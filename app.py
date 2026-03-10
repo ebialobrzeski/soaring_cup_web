@@ -33,6 +33,7 @@ from backend.routes.waypoints import waypoints_bp
 from backend.routes.tasks import tasks_bp
 from backend.routes.browse import browse_bp
 from backend.routes.admin import admin_bp
+from backend.routes.i18n import i18n_bp
 from backend.task_planner.routes import ai_planner_bp
 
 app = Flask(__name__)
@@ -68,6 +69,7 @@ app.register_blueprint(waypoints_bp)
 app.register_blueprint(tasks_bp)
 app.register_blueprint(browse_bp)
 app.register_blueprint(admin_bp)
+app.register_blueprint(i18n_bp)
 app.register_blueprint(ai_planner_bp)
 
 # ── Database ─────────────────────────────────────────────────────────────────

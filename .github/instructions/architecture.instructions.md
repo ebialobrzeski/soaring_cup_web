@@ -48,6 +48,7 @@ Never put business logic directly in `app.py`. Route handlers in `app.py` must s
 
 - DB access lives in service files or a dedicated `db/` layer — never in routes
 - Use parameterized queries or ORM methods — never string-interpolated SQL
+- When adding and/or removing functionallity always remember to update application translation keys and translations in `backend/models/i18n.py` and `backend/translations/` respectively
 
 ## Flask Blueprints
 

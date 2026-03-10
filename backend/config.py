@@ -32,7 +32,9 @@ NOAA_API_KEY: str = os.environ.get('NOAA_API_KEY', '')
 # Airspace APIs
 OPENAIP_API_KEY: str = os.environ.get('OPENAIP_API_KEY', '')
 ICAO_API_KEY: str = os.environ.get('ICAO_API_KEY', '')
-
+# Email (Resend)
+RESEND_API_KEY: str       = os.environ.get('RESEND_API_KEY', '')
+RESEND_FROM_ADDRESS: str  = os.environ.get('RESEND_FROM_ADDRESS', 'noreply@glideplan.org')
 # User tier limits — enforced server-side only
 TIER_LIMITS: dict = {
     'free': {

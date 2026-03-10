@@ -175,9 +175,13 @@ def browse_tasks(
         td = t.task_data or {}
         is_mine = bool(current_user and t.owner_id == current_user.id)
         raw_points = td.get('points', [])
-        # Compact lat/lon list for minimap rendering in the browser
+        # Compact lat/lon/name list for minimap rendering in the browser
         minimap_points = [
-            {'lat': p['waypoint']['latitude'], 'lon': p['waypoint']['longitude']}
+            {
+                'lat': p['waypoint']['latitude'],
+                'lon': p['waypoint']['longitude'],
+                'name': p['waypoint'].get('name', ''),
+            }
             for p in raw_points
             if isinstance(p, dict) and isinstance(p.get('waypoint'), dict)
             and 'latitude' in p['waypoint'] and 'longitude' in p['waypoint']
