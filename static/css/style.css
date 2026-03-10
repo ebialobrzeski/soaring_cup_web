@@ -887,7 +887,8 @@ html.sl-theme-dark .text-danger { color: #f87171; }
     flex-direction: column;
     gap: 6px;
     overflow-y: auto;
-    min-height: 0;
+    min-height: 400px;
+    max-height: calc(100vh - 420px);
     padding-right: 2px;
 }
 
@@ -1265,12 +1266,27 @@ sl-input::part(prefix) {
 /* Export Actions Card */
 .export-actions-card {
     margin-bottom: 0;
+    min-width: 0;
+}
+
+.export-actions-card::part(body) {
+    padding: 8px 10px;
 }
 
 .export-actions-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 6px;
+}
+
+.export-actions-grid sl-button,
+.export-actions-grid sl-dropdown {
+    min-width: 0;
+    width: 100%;
+}
+
+.export-actions-grid sl-dropdown sl-button {
+    width: 100%;
 }
 
 /* Wind fields (3-column grid of sl-inputs) */
@@ -2741,5 +2757,178 @@ html.sl-theme-dark .aip-score-poor      { background: rgba(239, 68, 68, 0.15);  
     .aip-sidebar {
         flex: none;
         width: 100%;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   MOBILE-FIRST RESPONSIVE OVERRIDES
+   All rules below use max-width so desktop is untouched.
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── 768px: tablets & large phones ── */
+@media (max-width: 768px) {
+
+    /* Container padding */
+    .container {
+        padding: 8px;
+    }
+
+    /* ── Header ── */
+    .modern-header {
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 10px 12px;
+        margin-bottom: 10px;
+    }
+
+    .site-logo {
+        height: 36px;
+    }
+
+    .header-text h1 {
+        font-size: 1.1rem;
+    }
+
+    .header-text p {
+        display: none;
+    }
+
+    /* Collapse the toolbar: hide coffee btn only */
+    #lang-selector {
+        width: 90px !important;
+    }
+
+    .header-support-btn {
+        display: none;
+    }
+
+    .header-toolbar sl-divider[vertical] {
+        display: none;
+    }
+
+    .header-toolbar {
+        gap: 4px;
+    }
+
+    /* ── Status bar ── */
+    .status-bar {
+        padding: 6px 10px;
+        margin-bottom: 10px;
+    }
+
+    /* ── Tabs: icon-only on mobile ── */
+    #main-tabs sl-tab span[data-i18n] {
+        display: none;
+    }
+
+    #main-tabs sl-tab i {
+        margin-right: 0;
+        font-size: 1rem;
+    }
+
+    /* ── Map toolbar ── */
+    .map-toolbar {
+        padding: 8px;
+        gap: 6px;
+    }
+
+    .map-toolbar sl-button-group {
+        overflow-x: auto;
+        max-width: 100%;
+    }
+
+    /* ── Map container (Map View tab) ── */
+    .map-container {
+        height: calc(100vh - 220px);
+        min-height: 280px;
+    }
+
+    /* ── Task planner ── */
+    .task-planner {
+        gap: 10px;
+    }
+
+    .task-sidebar {
+        max-height: 55vh;
+        min-height: 0;
+    }
+
+    .task-map-area .map-container {
+        height: 45vh;
+        min-height: 250px;
+    }
+
+    /* Wind grid: 2-col instead of 3 */
+    .wind-fields-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    /* ── Browse dialog ── */
+    .browse-item {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .browse-item-minimap {
+        display: none;
+    }
+
+    .browse-item-badges {
+        order: 3;
+    }
+
+    /* ── Waypoint table: hide lat/lon columns ── */
+    .waypoints-table th:nth-child(5),
+    .waypoints-table td:nth-child(5),
+    .waypoints-table th:nth-child(6),
+    .waypoints-table td:nth-child(6) {
+        display: none;
+    }
+
+    /* ── Dialogs: full-width on mobile ── */
+    sl-dialog::part(panel) {
+        width: 98vw;
+        max-width: 98vw;
+    }
+}
+
+/* ── 480px: phones ── */
+@media (max-width: 480px) {
+
+    .modern-header {
+        padding: 8px 10px;
+    }
+
+    /* Single-column export actions */
+    .export-actions-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* Single-column wind fields */
+    .wind-fields-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* Task sidebar shorter so map is more visible */
+    .task-sidebar {
+        max-height: 45vh;
+    }
+
+    .task-map-area .map-container {
+        height: 50vh;
+    }
+
+    /* Browse points list: single column */
+    .browse-points-list {
+        columns: 1;
+    }
+
+    /* Map toolbar buttons: icon only */
+    .map-toolbar sl-button span[data-i18n] {
+        display: none;
+    }
+
+    .map-toolbar sl-button i[slot="prefix"] {
+        margin-right: 0;
     }
 }
