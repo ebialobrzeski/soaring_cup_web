@@ -38,7 +38,7 @@
         const hasBounds = !!_selectedBounds;
         const hasType = [
             'wpgen-airports', 'wpgen-outlandings', 'wpgen-obstacles',
-            'wpgen-navaids', 'wpgen-hotspots', 'wpgen-hang-glidings',
+            'wpgen-navaids', 'wpgen-hotspots', 'wpgen-hang-glidings', 'wpgen-reporting-points',
             'wpgen-cities', 'wpgen-towns', 'wpgen-villages',
         ].some((id) => {
             const el = $(id);
@@ -158,6 +158,7 @@
             'wpgen-navaids': 'navaids',
             'wpgen-hotspots': 'hotspots',
             'wpgen-hang-glidings': 'hang_glidings',
+            'wpgen-reporting-points': 'reporting_points',
             'wpgen-cities': 'cities',
             'wpgen-towns': 'towns',
             'wpgen-villages': 'villages',
@@ -270,7 +271,7 @@
         // Update generate button state when checkboxes change
         [
             'wpgen-airports', 'wpgen-outlandings', 'wpgen-obstacles',
-            'wpgen-navaids', 'wpgen-hotspots', 'wpgen-hang-glidings',
+            'wpgen-navaids', 'wpgen-hotspots', 'wpgen-hang-glidings', 'wpgen-reporting-points',
             'wpgen-cities', 'wpgen-towns', 'wpgen-villages',
         ].forEach((id) => {
             const el = $(id);

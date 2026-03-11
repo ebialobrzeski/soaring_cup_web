@@ -205,7 +205,7 @@ def query_openaip_aviation(
 ) -> list[Waypoint]:
     """Fetch aviation waypoints from OpenAIP for the given bbox.
 
-    types is a subset of ['airports', 'outlandings', 'obstacles', 'hotspots', 'navaids', 'hang_glidings'].
+    types is a subset of ['airports', 'outlandings', 'obstacles', 'hotspots', 'navaids', 'hang_glidings', 'reporting_points'].
     """
     headers = _openaip_headers()
     bbox = _openaip_bbox_param(min_lat, max_lat, min_lon, max_lon)
@@ -217,6 +217,7 @@ def query_openaip_aviation(
     want_hotspots = 'hotspots' in types
     want_navaids = 'navaids' in types
     want_hang_glidings = 'hang_glidings' in types
+    want_reporting_points = 'reporting_points' in types
 
     # ── Airports / airfields / glider sites ──────────────────────────────────
     if want_airports or want_outlandings:
@@ -406,6 +407,36 @@ def query_openaip_aviation(
                 description='Hang gliding / paragliding site',
             ))
 
+    # ── Reporting points ──────────────────────────────────────────────────────
+    if want_reporting_points:
+        try:
+            items = _fetch_openaip_pages('reporting-points', {'bbox': bbox}, headers)
+        except RuntimeError:
+            raise
+
+        for item in items:
+            name = item.get('name', '') or ''
+            if not name:
+                continue
+
+            geo = item.get('geometry', {})
+            coords = geo.get('coordinates', [0, 0])
+            lon, lat = float(coords[0]), float(coords[1])
+
+            elev_obj = item.get('elevation', {})
+            elev = int(elev_obj.get('value', 0) or 0) if isinstance(elev_obj, dict) else 0
+
+            waypoints.append(Waypoint(
+                name=name,
+                code=_make_code(name),
+                country=item.get('country', '') or '',
+                latitude=lat,
+                longitude=lon,
+                elevation=elev,
+                style=19,  # CUP: reporting point
+                description='Reporting point',
+            ))
+
     return waypoints
 
 
@@ -568,7 +599,7 @@ def generate_waypoints(
             'Please select a smaller area for populated places.'
         )
 
-    aviation_types = [t for t in types if t in ('airports', 'outlandings', 'obstacles', 'hotspots', 'navaids', 'hang_glidings')]
+    aviation_types = [t for t in types if t in ('airports', 'outlandings', 'obstacles', 'hotspots', 'navaids', 'hang_glidings', 'reporting_points')]
     osm_types = [t for t in types if t in ('cities', 'towns', 'villages')]
 
     # If area is too large, suppress OSM queries
