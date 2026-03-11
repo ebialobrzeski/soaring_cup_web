@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.legacy import Waypoint
 from backend import config
+from backend.task_planner.terrain import get_elevations
 
 logger = logging.getLogger(__name__)
 
@@ -100,9 +101,39 @@ _OPENAIP_AIRPORT_TYPES = {
 
 # CUP style codes to assign to OpenAIP results
 _OPENAIP_AIRPORT_CUP_STYLE = {
-    'airports': 5,      # glider airfield (closest match)
+    'airports': 5,      # fallback: airfield with hard runway
     'outlandings': 3,   # outlanding
 }
+
+# OpenAIP runway surface mainComposite values that indicate a paved/hard surface
+# 0=ASPH (asphalt), 1=CONC (concrete) — everything else is soft/grass/unknown
+_HARD_SURFACE_COMPOSITES: frozenset[int] = frozenset({0, 1})
+
+
+def _airport_cup_style(item: dict, category: str) -> int:
+    """Return the appropriate CUP style for an OpenAIP airport item.
+
+    - outlandings (incl. heliports, ultralight sites) → 3
+    - GLIDER_SITE (OpenAIP type 5) → 4  (glider airfield)
+    - airports with any paved/hard runway → 5
+    - airports with only soft/grass runways → 2
+    """
+    apt_type = item.get('type', -1)
+
+    if category == 'outlandings':
+        # Glider sites have a proper runway — more accurately a glider airfield
+        return 4 if apt_type == 5 else 3
+
+    # category == 'airports': check runway surfaces
+    runways = item.get('runways', [])
+    for rwy in runways:
+        surface = rwy.get('surface') or {}
+        if isinstance(surface, dict):
+            composite = surface.get('mainComposite')
+            if composite in _HARD_SURFACE_COMPOSITES:
+                return 5  # paved runway found
+    # No paved runway — treat as grass/soft airfield
+    return 2
 
 # OpenAIP obstacle → CUP style 8 (Transmitter mast); closest generic obstacle in CUP spec
 _OPENAIP_OBSTACLE_CUP_STYLE = 8
@@ -225,7 +256,7 @@ def query_openaip_aviation(
                 primary = next((f for f in frequencies if f.get('primary')), frequencies[0])
                 freq = str(primary.get('value', '')) or ''
 
-            cup_style = _OPENAIP_AIRPORT_CUP_STYLE.get(category, 5)
+            cup_style = _airport_cup_style(item, category)
 
             waypoints.append(Waypoint(
                 name=name,
@@ -465,9 +496,9 @@ def query_osm_places(
         country = tags.get('addr:country') or tags.get('is_in:country_code', '')
         ele_raw = tags.get('ele', '')
         try:
-            elev = int(float(ele_raw)) if ele_raw else 0
+            elev = int(float(ele_raw)) if ele_raw else None
         except (ValueError, TypeError):
-            elev = 0
+            elev = None
 
         desc_parts = [place_type.capitalize()]
         if population:
@@ -483,10 +514,21 @@ def query_osm_places(
             country=country,
             latitude=float(lat),
             longitude=float(lon),
-            elevation=elev,
+            elevation=elev if elev is not None else 0,
             style=_PLACE_STYLE,
             description=description,
         ))
+
+    # Batch-fetch elevation for any waypoint that had no OSM ele tag
+    missing = [(wp.latitude, wp.longitude) for wp in waypoints if wp.elevation == 0]
+    if missing:
+        try:
+            elev_map = get_elevations(missing)
+            for wp in waypoints:
+                if wp.elevation == 0:
+                    wp.elevation = elev_map.get((wp.latitude, wp.longitude), 0)
+        except Exception:
+            logger.warning('Batch elevation fetch failed for OSM places; elevations will be 0.')
 
     return waypoints
 
