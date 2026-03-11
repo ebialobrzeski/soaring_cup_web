@@ -54,6 +54,18 @@ Never put business logic directly in `app.py`. Route handlers in `app.py` must s
 - Use parameterized queries or ORM methods — never string-interpolated SQL
 - When adding and/or removing functionallity always remember to update application translation keys and translations in `backend/models/i18n.py` and `backend/translations/` respectively
 
+## Internationalisation (i18n)
+
+**Every new UI element must have a translation.** This is non-negotiable — never add visible text to HTML or JS without covering all four languages (en, pl, de, cs).
+
+Checklist whenever a new label, button, checkbox, tooltip, or status message is added:
+
+1. Add a `data-i18n="category.key"` attribute to the HTML element (or use `window.i18n.t('category.key', 'Fallback')` in JS).
+2. Create a new SQL migration (`backend/migrations/NNN_<feature>_i18n.sql`) that:
+   - Inserts the key into `translation_keys` with `default_value` = English text.
+   - Inserts rows into `translations` for `pl`, `de`, and `cs` using the `key_id` + `language_code` JOIN pattern (see existing migrations for the exact syntax).
+3. Follow the naming convention `category.key` — use an existing category (`wpgen`, `btn`, `confirm`, `task`, `map`, …) or introduce a new one consistently.
+
 ## Flask Blueprints
 
 - Every feature area must be a **Blueprint** registered in `app.py`
