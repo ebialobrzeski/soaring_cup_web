@@ -450,9 +450,13 @@ def query_osm_places(
     place_regex = '|'.join(sorted(place_set))
     bbox = f'{min_lat},{min_lon},{max_lat},{max_lon}'
     query = (
-        f'[out:json][timeout:20];'
+        f'[out:json][timeout:25];'
         f'(node["place"~"^({place_regex})$"]({bbox}););'
         f'out body;'
+        f'>>;'
+        f'is_in;'
+        f'area._["boundary"="administrative"]["admin_level"="2"];'
+        f'out tags;'
     )
 
     try:
