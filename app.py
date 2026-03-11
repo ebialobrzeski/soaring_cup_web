@@ -34,6 +34,7 @@ from backend.routes.tasks import tasks_bp
 from backend.routes.browse import browse_bp
 from backend.routes.admin import admin_bp
 from backend.routes.i18n import i18n_bp
+from backend.routes.waypoint_generation import waypoint_gen_bp
 from backend.task_planner.routes import ai_planner_bp
 
 app = Flask(__name__)
@@ -70,6 +71,7 @@ app.register_blueprint(tasks_bp)
 app.register_blueprint(browse_bp)
 app.register_blueprint(admin_bp)
 app.register_blueprint(i18n_bp)
+app.register_blueprint(waypoint_gen_bp)
 app.register_blueprint(ai_planner_bp)
 
 # ── Database ─────────────────────────────────────────────────────────────────
@@ -121,10 +123,6 @@ app.logger.info('GlidePlan startup (debug=%s)', app.debug)
 # Ensure directories exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(DATA_FOLDER, exist_ok=True)
-
-# XCSoar repository cache
-_xcsoar_repo_cache = None
-_xcsoar_repo_cache_ts = 0.0
 
 
 def get_session_data_file():
@@ -338,6 +336,18 @@ def clear_waypoints():
     """Clear all waypoints from session."""
     session.pop('waypoints', None)
     session.pop('current_filename', None)
+    # Also clear the JSON data file so generate/other routes don't see stale data
+    try:
+        data_file = get_session_data_file()
+        if os.path.exists(data_file):
+            with open(data_file, 'r', encoding='utf-8') as f:
+                existing = json.load(f)
+            existing['waypoints'] = []
+            existing['current_filename'] = ''
+            with open(data_file, 'w', encoding='utf-8') as f:
+                json.dump(existing, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        app.logger.error(f'Error clearing session data file: {e}')
     app.logger.info("Cleared all waypoints from session")
     return jsonify({'success': True, 'message': 'All waypoints cleared'})
 
@@ -1022,82 +1032,6 @@ def share_download(token):
     except Exception as e:
         app.logger.error(f"Share download error {token}: {e}")
         return 'Error', 500
-
-
-# ──────────── XCSoar Repository ────────────
-
-def _parse_xcsoar_repo(text):
-    """Parse the XCSoar data repository index into a list of dicts."""
-    entries = []
-    for block in text.split('\n\n'):
-        block = block.strip()
-        if not block:
-            continue
-        entry = {}
-        for line in block.splitlines():
-            if '=' in line:
-                k, _, v = line.partition('=')
-                entry[k.strip()] = v.strip()
-        if entry.get('type') in ('waypoint', 'airspace') and 'uri' in entry:
-            entries.append(entry)
-    return entries
-
-
-@app.route('/api/xcsoar-repo')
-def xcsoar_repo_index():
-    """Return the cached XCSoar repository entry list."""
-    global _xcsoar_repo_cache, _xcsoar_repo_cache_ts
-    now = _time.time()
-    if _xcsoar_repo_cache is not None and (now - _xcsoar_repo_cache_ts) < 3600:
-        return jsonify({'entries': _xcsoar_repo_cache})
-    try:
-        resp = requests.get('https://download.xcsoar.org/repository', timeout=15)
-        resp.raise_for_status()
-        entries = _parse_xcsoar_repo(resp.text)
-        _xcsoar_repo_cache = entries
-        _xcsoar_repo_cache_ts = now
-        return jsonify({'entries': entries})
-    except Exception as e:
-        app.logger.error(f'XCSoar repo fetch error: {e}')
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/xcsoar-proxy')
-def xcsoar_proxy():
-    """Proxy-download a file from the XCSoar repository (allowlist enforced)."""
-    global _xcsoar_repo_cache, _xcsoar_repo_cache_ts
-    url = request.args.get('url', '').strip()
-    if not url:
-        return jsonify({'error': 'Missing url parameter'}), 400
-
-    # Ensure allowlist is populated
-    if _xcsoar_repo_cache is None:
-        try:
-            resp = requests.get('https://download.xcsoar.org/repository', timeout=15)
-            resp.raise_for_status()
-            _xcsoar_repo_cache = _parse_xcsoar_repo(resp.text)
-            _xcsoar_repo_cache_ts = _time.time()
-        except Exception as e:
-            app.logger.error(f'XCSoar repo fetch error (proxy): {e}')
-            return jsonify({'error': 'Could not fetch repository index'}), 500
-
-    allowed = {e['uri'] for e in _xcsoar_repo_cache}
-    if url not in allowed:
-        return jsonify({'error': 'URL not in XCSoar repository'}), 403
-
-    try:
-        from flask import Response
-        r = requests.get(url, timeout=30)
-        r.raise_for_status()
-        fname = url.split('/')[-1].split('?')[0] or 'download'
-        return Response(
-            r.content,
-            content_type=r.headers.get('content-type', 'text/plain; charset=utf-8'),
-            headers={'Content-Disposition': f'attachment; filename="{fname}"'}
-        )
-    except Exception as e:
-        app.logger.error(f'XCSoar proxy error for {url}: {e}')
-        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':

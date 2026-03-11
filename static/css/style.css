@@ -207,7 +207,7 @@ body.view-mode #task-share-btn {
     to { transform: rotate(360deg); }
 }
 
-/* Map Toolbar */
+/* Map Toolbar — kept for legacy reference, now replaced by map-view sidebar */
 .map-toolbar {
     display: flex;
     align-items: center;
@@ -223,6 +223,174 @@ body.view-mode #task-share-btn {
 .map-toolbar sl-button-group {
     flex-shrink: 0;
 }
+
+/* ──────────── Map View Sidebar Layout ──────────── */
+.map-view {
+    display: flex;
+    gap: 20px;
+    height: calc(100vh - 540px);
+    min-height: 300px;
+}
+
+.map-sidebar {
+    flex: 0 0 220px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+}
+
+.map-sidebar-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.map-sidebar-actions sl-button {
+    width: 100%;
+}
+
+.map-file-card::part(body),
+.map-tools-card::part(body) {
+    padding: 8px 10px;
+}
+
+.map-content-area {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+}
+
+.map-content-area .map-container {
+    flex: 1;
+    min-height: 400px;
+    height: auto;
+    max-height: none;
+}
+
+@media (max-width: 900px) {
+    .map-view {
+        flex-direction: column;
+        height: auto;
+    }
+    .map-sidebar {
+        flex: none;
+    }
+    .map-content-area .map-container {
+        min-height: 350px;
+        height: calc(100vh - 400px);
+    }
+}
+/* ──────────── End Map View Sidebar Layout ──────────── */
+
+/* ──────────── Waypoint Generation Card ──────────── */
+.map-wpgen-card::part(body) {
+    padding: 8px 10px;
+}
+
+.wpgen-area-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.wpgen-area-info {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--sl-color-primary-50);
+    border: 1px solid var(--sl-color-primary-200);
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 11px;
+}
+
+[data-theme="dark"] .wpgen-area-info {
+    background: rgba(37, 99, 235, 0.15);
+    border-color: rgba(37, 99, 235, 0.4);
+}
+
+.wpgen-area-text {
+    flex: 1;
+    color: var(--text-primary);
+    font-family: monospace;
+    font-size: 10px;
+    word-break: break-all;
+}
+
+.wpgen-section-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
+    margin-top: 4px;
+}
+
+.wpgen-section-label small {
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+.wpgen-types {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 4px;
+}
+
+.wpgen-types sl-checkbox {
+    font-size: 13px;
+    --sl-font-size-small: 12px;
+}
+
+.wpgen-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.wpgen-actions sl-button {
+    width: 100%;
+}
+
+.wpgen-status {
+    margin-top: 8px;
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 6px 8px;
+    border-radius: 4px;
+    background: var(--background);
+    border: 1px solid var(--border);
+}
+
+.wpgen-status--success {
+    border-color: var(--success-color);
+    color: var(--success-color);
+}
+
+.wpgen-status--error {
+    border-color: var(--danger-color);
+    color: var(--danger-color);
+}
+
+.wpgen-status--info {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+/* Cursor when drawing area selection */
+.wpgen-selecting {
+    cursor: crosshair !important;
+}
+
+/* ──────────── End Waypoint Generation Card ──────────── */
 
 /* Old map-controls styles */
 .map-controls {
@@ -879,7 +1047,53 @@ html.sl-theme-dark .text-danger { color: #f87171; }
     gap: 20px;
     height: calc(100vh - 200px);
     min-height: 450px;
+    position: relative; /* needed for no-waypoints overlay */
 }
+
+/* No-waypoints overlay */
+.task-no-waypoints-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(248, 250, 252, 0.94);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    border-radius: 8px;
+    backdrop-filter: blur(3px);
+}
+
+[data-theme="dark"] .task-no-waypoints-overlay {
+    background: rgba(15, 23, 42, 0.94);
+}
+
+.task-no-waypoints-content {
+    text-align: center;
+    padding: 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+}
+
+.task-no-waypoints-content i {
+    color: var(--text-secondary);
+}
+
+.task-no-waypoints-content h3 {
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.task-no-waypoints-content p {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    max-width: 320px;
+    margin: 0;
+}
+/* ──────────── End No-waypoints overlay ──────────── */
 
 .task-sidebar {
     flex: 0 0 320px;
@@ -2033,13 +2247,6 @@ sl-input::part(prefix) {
     z-index: 10;
 }
 
-
-.xcsoar-repo-empty {
-    padding: 24px;
-    text-align: center;
-    color: var(--text-secondary);
-    font-size: 13px;
-}
 
 /* Confirmation dialog — handled by Shoelace <sl-dialog> */
 

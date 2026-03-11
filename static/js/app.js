@@ -84,16 +84,29 @@ class SoaringCupEditor {
             if (panel === 'map') {
                 setTimeout(() => this.map.invalidateSize(), 100);
             }
-            if (panel === 'task' && window.taskPlanner) {
-                setTimeout(() => {
-                    window.taskPlanner.initMap();
-                    // Extra invalidation after Shoelace panel CSS transition completes (~300ms)
-                    setTimeout(() => window.taskPlanner?.map?.invalidateSize(true), 350);
-                }, 100);
+            if (panel === 'task') {
+                // Show overlay when no waypoints are loaded (editor mode only)
+                if (!window.VIEW_MODE) {
+                    const hasWaypoints = this.waypoints && this.waypoints.length > 0;
+                    const overlay = document.getElementById('task-no-waypoints-overlay');
+                    if (overlay) overlay.style.display = hasWaypoints ? 'none' : 'flex';
+                }
+                if (window.taskPlanner) {
+                    setTimeout(() => {
+                        window.taskPlanner.initMap();
+                        // Extra invalidation after Shoelace panel CSS transition completes (~300ms)
+                        setTimeout(() => window.taskPlanner?.map?.invalidateSize(true), 350);
+                    }, 100);
+                }
             }
             if (panel === 'ai-planner') {
                 this._updateAiPlannerPanel();
             }
+        });
+
+        // "Go to Map View" button inside task planner no-waypoints overlay
+        document.getElementById('task-go-to-map-btn')?.addEventListener('click', () => {
+            document.getElementById('main-tabs')?.show('map');
         });
 
         // Map controls (present in both modes)
@@ -265,7 +278,7 @@ class SoaringCupEditor {
 
     async newFile() {
         if (this.waypoints.length > 0) {
-            const confirmed = await window.showConfirmModal('This will clear all current waypoints. Continue?');
+            const confirmed = await window.showConfirmModal(window.i18n?.t('confirm.clear_waypoints') ?? 'This will clear all current waypoints. Continue?');
             if (!confirmed) return;
         }
 
@@ -499,7 +512,9 @@ class SoaringCupEditor {
         }
 
         const count = this.selectedWaypoints.size;
-        const confirmed = await window.showConfirmModal(`Delete ${count} waypoint(s)?`);
+        const confirmed = await window.showConfirmModal(
+            (window.i18n?.t('confirm.delete_n_waypoints') ?? 'Delete {n} waypoint(s)?').replace('{n}', count)
+        );
         if (!confirmed) return;
 
         try {
@@ -530,7 +545,9 @@ class SoaringCupEditor {
             return;
         }
 
-        const confirmed = await window.showConfirmModal(`Delete waypoint "${waypoint.name}"?`);
+        const confirmed = await window.showConfirmModal(
+            (window.i18n?.t('confirm.delete_waypoint') ?? 'Delete waypoint "{name}"?').replace('{name}', waypoint.name)
+        );
         if (!confirmed) return;
 
         try {
@@ -784,7 +801,7 @@ class SoaringCupEditor {
                 <td>
                     <span class="airfield-indicator ${isAirfield ? 'airfield-yes' : 'airfield-no'}">
                         <i class="fas fa-${isAirfield ? 'plane' : 'circle'}"></i>
-                        ${isAirfield ? 'Yes' : 'No'}
+                        ${isAirfield ? (window.i18n?.t('common.yes') ?? 'Yes') : (window.i18n?.t('common.no') ?? 'No')}
                     </span>
                 </td>
                 <td>
@@ -1068,10 +1085,10 @@ class SoaringCupEditor {
         let actionsSection = `
             <div class="popup-actions">
                 <sl-button size="small" variant="neutral" onclick="app.showWaypointModal(app.waypoints[${index}], ${index})">
-                    <i class="fas fa-edit"></i> Edit
+                    <i class="fas fa-edit"></i> ${i18n.t('btn.edit', 'Edit')}
                 </sl-button>
                 <sl-button size="small" variant="danger" onclick="app.deleteWaypointFromMap(${index})">
-                    <i class="fas fa-trash"></i> Delete
+                    <i class="fas fa-trash"></i> ${i18n.t('btn.delete', 'Delete')}
                 </sl-button>
             </div>
         `;

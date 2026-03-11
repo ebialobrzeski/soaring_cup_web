@@ -510,6 +510,7 @@ class AdminPanel {
         el.textContent = msg;
         el.style.display = msg ? '' : 'none';
     }
+
 }
 
 window.adminPanel = new AdminPanel();

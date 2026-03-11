@@ -278,8 +278,8 @@ class BrowseDialog {
     async _loadItem(item) {
         const confirmed = await window.showConfirmModal(
             this.type === 'waypoints'
-                ? 'This will replace your current waypoints with the selected file. Continue?'
-                : 'This will replace your current task. Continue?'
+                ? (window.i18n?.t('confirm.replace_waypoints') ?? 'This will replace your current waypoints with the selected file. Continue?')
+                : (window.i18n?.t('confirm.replace_task') ?? 'This will replace your current task. Continue?')
         );
         if (!confirmed) return;
 

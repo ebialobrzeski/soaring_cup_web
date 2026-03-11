@@ -421,7 +421,7 @@ class MyContentPanel {
 
     _renderGlidersTable(gliders, tbody) {
         if (!gliders.length) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--text-secondary);">No custom gliders. Click "Add Glider" to create one.</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--text-secondary);">${window.i18n?.t('mc.no_gliders_action') ?? 'No custom gliders. Click \u201cAdd Glider\u201d to create one.'}</td></tr>`;
             return;
         }
 

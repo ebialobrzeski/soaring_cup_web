@@ -110,57 +110,131 @@
 
             <!-- Map View -->
             <sl-tab-panel name="map">
-                <div class="map-toolbar">
-                    {% if not view_mode %}
-                    <sl-button-group label="File Operations">
-                        <sl-button id="new-btn" variant="default">
-                            <i class="fas fa-file" slot="prefix"></i> <span data-i18n="map.new">New</span>
-                        </sl-button>
-                        <sl-button id="open-file-btn" variant="default">
-                            <i class="fas fa-folder-open" slot="prefix"></i> <span data-i18n="map.open_file">Open File</span>
-                        </sl-button>
-                        <input type="file" id="file-upload" accept=".cup,.csv" style="display: none;">
-                        <sl-button id="save-cup-btn" variant="success" disabled>
-                            <i class="fas fa-save" slot="prefix"></i> <span data-i18n="map.save_cup">Save CUP</span>
-                        </sl-button>
-                        <sl-button id="save-to-account-btn" variant="success" data-auth-required style="display:none">
-                            <i class="fas fa-cloud-upload-alt" slot="prefix"></i> <span data-i18n="map.save_to_account">Save to Account</span>
-                        </sl-button>
-                        <sl-button id="browse-waypoints-btn" variant="default" data-auth-required style="display:none">
-                            <i class="fas fa-search" slot="prefix"></i> <span data-i18n="btn.browse">Browse</span>
-                        </sl-button>
-                    </sl-button-group>
-                    <sl-divider vertical></sl-divider>
-                    {% endif %}
-                    <sl-button-group label="Map Tools">
-                        <sl-tooltip content="Fit all waypoints in view">
-                            <sl-button id="fit-bounds-btn" variant="default">
-                                <i class="fas fa-expand-arrows-alt"></i>
-                            </sl-button>
-                        </sl-tooltip>
-                        <sl-button id="add-waypoint-map-btn" variant="primary">
-                            <i class="fas fa-map-pin" slot="prefix"></i> <span data-i18n="map.add_waypoint">Add Waypoint</span>
-                        </sl-button>
-                        <sl-tooltip content="Show waypoint icons legend">
-                            <sl-button id="show-legend-btn" variant="default">
-                                <i class="fas fa-info-circle"></i>
-                            </sl-button>
-                        </sl-tooltip>
+                <div class="map-view">
+                    <div class="map-sidebar">
                         {% if not view_mode %}
-                        <sl-tooltip content="Browse XCSoar waypoint repository">
-                            <sl-button id="xcsoar-repo-map-btn" variant="default">
-                                <i class="fas fa-database"></i>
-                            </sl-button>
-                        </sl-tooltip>
+                        <!-- File Operations Card -->
+                        <sl-card class="map-file-card">
+                            <div slot="header" class="card-header-with-icon">
+                                <i class="fas fa-folder-open"></i> <span data-i18n="map.file_ops">File</span>
+                            </div>
+                            <div class="map-sidebar-actions">
+                                <sl-button id="new-btn" variant="default" size="small">
+                                    <i class="fas fa-file" slot="prefix"></i> <span data-i18n="map.new">New</span>
+                                </sl-button>
+                                <sl-button id="open-file-btn" variant="default" size="small">
+                                    <i class="fas fa-folder-open" slot="prefix"></i> <span data-i18n="map.open_file">Open File</span>
+                                </sl-button>
+                                <input type="file" id="file-upload" accept=".cup,.csv" style="display: none;">
+                                <sl-button id="save-cup-btn" variant="success" size="small" disabled>
+                                    <i class="fas fa-save" slot="prefix"></i> <span data-i18n="map.save_cup">Save CUP</span>
+                                </sl-button>
+                                <sl-button id="save-to-account-btn" variant="success" size="small" data-auth-required style="display:none">
+                                    <i class="fas fa-cloud-upload-alt" slot="prefix"></i> <span data-i18n="map.save_to_account">Save to Account</span>
+                                </sl-button>
+                                <sl-button id="browse-waypoints-btn" variant="default" size="small" data-auth-required style="display:none">
+                                    <i class="fas fa-search" slot="prefix"></i> <span data-i18n="btn.browse">Browse</span>
+                                </sl-button>
+                            </div>
+                        </sl-card>
                         {% endif %}
-                    </sl-button-group>
+                        <!-- Map Tools Card -->
+                        <sl-card class="map-tools-card">
+                            <div slot="header" class="card-header-with-icon">
+                                <i class="fas fa-map"></i> <span data-i18n="map.tools_card">Map Tools</span>
+                            </div>
+                            <div class="map-sidebar-actions">
+                                <sl-button id="fit-bounds-btn" variant="default" size="small" title="Fit all waypoints in view" data-i18n-title="map.fit_view_title">
+                                    <i class="fas fa-expand-arrows-alt" slot="prefix"></i> <span data-i18n="map.fit_view">Fit View</span>
+                                </sl-button>
+                                <sl-button id="add-waypoint-map-btn" variant="primary" size="small">
+                                    <i class="fas fa-map-pin" slot="prefix"></i> <span data-i18n="map.add_waypoint">Add Waypoint</span>
+                                </sl-button>
+                                <sl-button id="show-legend-btn" variant="default" size="small" title="Show waypoint icons legend" data-i18n-title="map.legend_title">
+                                    <i class="fas fa-info-circle" slot="prefix"></i> <span data-i18n="map.legend">Legend</span>
+                                </sl-button>
+
+                            </div>
+                        </sl-card>
+
+                        {% if not view_mode %}
+                        <!-- Waypoint Generation Card -->
+                        <sl-card class="map-wpgen-card">
+                            <div slot="header" class="card-header-collapsible">
+                                <span class="card-header-with-icon">
+                                    <i class="fas fa-magic"></i> <span data-i18n="wpgen.card_header">Generate Waypoints</span>
+                                </span>
+                                <sl-icon-button id="wpgen-card-toggle" name="chevron-down" label="Collapse" data-i18n-label="btn.collapse"></sl-icon-button>
+                            </div>
+                            <div id="wpgen-card-body">
+                                <!-- Area selector -->
+                                <div class="wpgen-area-row">
+                                    <sl-button id="wpgen-select-area-btn" variant="default" size="small" title="Draw a rectangle on the map to select an area" data-i18n-title="wpgen.select_area_title">
+                                        <i class="fas fa-vector-square" slot="prefix"></i> <span data-i18n="wpgen.select_area">Select Area</span>
+                                    </sl-button>
+                                    <div id="wpgen-area-info" class="wpgen-area-info" style="display:none">
+                                        <span id="wpgen-area-text" class="wpgen-area-text"></span>
+                                        <sl-icon-button id="wpgen-clear-area-btn" name="x-circle" title="Clear selection" data-i18n-title="wpgen.clear_area" style="font-size:14px"></sl-icon-button>
+                                    </div>
+                                </div>
+
+                                <!-- Source type toggles -->
+                                <div class="wpgen-section-label">
+                                    <i class="fas fa-plane-departure"></i> <span data-i18n="wpgen.aviation">Aviation</span>
+                                </div>
+                                <div class="wpgen-types">
+                                    <sl-checkbox id="wpgen-airports" size="small" checked><span data-i18n="wpgen.airports">Airports &amp; Airfields</span></sl-checkbox>
+                                    <sl-checkbox id="wpgen-outlandings" size="small"><span data-i18n="wpgen.outlandings">Outlanding fields</span></sl-checkbox>
+                                    <sl-checkbox id="wpgen-obstacles" size="small"><span data-i18n="wpgen.obstacles">Obstacles</span></sl-checkbox>
+                                    <sl-checkbox id="wpgen-navaids" size="small"><span data-i18n="wpgen.navaids">Nav aids (VOR/NDB)</span></sl-checkbox>
+                                    <sl-checkbox id="wpgen-hotspots" size="small"><span data-i18n="wpgen.hotspots">Thermal hotspots</span></sl-checkbox>
+                                    <sl-checkbox id="wpgen-hang-glidings" size="small"><span data-i18n="wpgen.hang_glidings">Hang gliding sites</span></sl-checkbox>
+                                </div>
+
+                                <div class="wpgen-section-label" style="margin-top:10px">
+                                    <i class="fas fa-city"></i> <span data-i18n="wpgen.populated_places">Populated Places</span>
+                                </div>
+                                <div class="wpgen-types">
+                                    <sl-checkbox id="wpgen-cities" size="small"><span data-i18n="wpgen.cities">Cities</span></sl-checkbox>
+                                    <sl-checkbox id="wpgen-towns" size="small"><span data-i18n="wpgen.towns">Towns</span></sl-checkbox>
+                                    <sl-checkbox id="wpgen-villages" size="small"><span data-i18n="wpgen.villages">Villages</span></sl-checkbox>
+                                </div>
+
+                                <!-- Actions -->
+                                <div class="wpgen-actions">
+                                    <sl-button id="wpgen-generate-btn" variant="primary" size="small" disabled>
+                                        <i class="fas fa-play" slot="prefix"></i> <span data-i18n="wpgen.generate">Generate</span>
+                                    </sl-button>
+                                </div>
+
+                                <!-- Status / result info -->
+                                <div id="wpgen-status" class="wpgen-status" style="display:none"></div>
+                            </div>
+                        </sl-card>
+                        {% endif %}
+                    </div><!-- /.map-sidebar -->
+                    <div class="map-content-area">
+                        <div id="map" class="map-container"></div>
+                    </div>
                 </div>
-                <div id="map" class="map-container"></div>
             </sl-tab-panel>
 
             <!-- Task Planner -->
             <sl-tab-panel name="task">
                 <div class="task-planner">
+                    {% if not view_mode %}
+                    <!-- No-waypoints overlay: shown when no waypoints are loaded -->
+                    <div id="task-no-waypoints-overlay" class="task-no-waypoints-overlay" style="display:none">
+                        <div class="task-no-waypoints-content">
+                            <i class="fas fa-map-marker-slash fa-3x"></i>
+                            <h3>No Waypoints Loaded</h3>
+                            <p>Load a waypoint file or add waypoints in <strong>Map View</strong> to start planning a task.</p>
+                            <sl-button variant="primary" id="task-go-to-map-btn">
+                                <i class="fas fa-map" slot="prefix"></i> Go to Map View
+                            </sl-button>
+                        </div>
+                    </div>
+                    {% endif %}
                     <div class="task-sidebar">
                         <!-- Task Toolbar Card -->
                         <sl-card class="task-toolbar-card">
@@ -217,13 +291,13 @@
                                 <sl-icon-button id="wind-card-toggle" name="chevron-down" label="Collapse"></sl-icon-button>
                             </div>
                             <div id="wind-card-body" class="wind-fields-grid">
-                                <sl-input type="number" id="task-wind-dir" label="Wind °" size="small" min="0" max="360" value="0" no-spin-buttons>
+                                <sl-input type="number" id="task-wind-dir" label="Wind °" data-i18n-label="task.wind_dir" size="small" min="0" max="360" value="0" no-spin-buttons>
                                     <i class="fas fa-compass" slot="prefix"></i>
                                 </sl-input>
-                                <sl-input type="number" id="task-wind-speed" label="Speed kt" size="small" min="0" max="150" value="0" no-spin-buttons>
+                                <sl-input type="number" id="task-wind-speed" label="Speed kt" data-i18n-label="task.wind_speed" size="small" min="0" max="150" value="0" no-spin-buttons>
                                     <i class="fas fa-wind" slot="prefix"></i>
                                 </sl-input>
-                                <sl-input type="number" id="task-tas" label="TAS km/h" size="small" min="0" max="400" value="100" no-spin-buttons>
+                                <sl-input type="number" id="task-tas" label="TAS km/h" data-i18n-label="task.tas" size="small" min="0" max="400" value="100" no-spin-buttons>
                                     <i class="fas fa-plane" slot="prefix"></i>
                                 </sl-input>
                             </div>
@@ -246,22 +320,22 @@
                             {% if not view_mode %}
                             <div id="task-advanced-panel" class="task-advanced-panel" style="display:none">
                                 <div class="task-option-field">
-                                    <label><i class="fas fa-clock"></i> No start before (UTC)</label>
+                                    <label><i class="fas fa-clock"></i> <span data-i18n="task.no_start_before">No start before (UTC)</span></label>
                                     <input type="time" id="task-no-start" class="native-time-input" value="12:00">
                                 </div>
                                 <div class="task-option-field">
-                                    <label><i class="fas fa-hourglass-half"></i> Task time</label>
+                                    <label><i class="fas fa-hourglass-half"></i> <span data-i18n="task.task_time">Task time</span></label>
                                     <input type="text" id="task-time" class="native-time-input" value="03:00:00" placeholder="HH:MM:SS">
                                 </div>
                             </div>
                             {% else %}
                             <div class="task-advanced-panel">
                                 <div class="task-option-field">
-                                    <label><i class="fas fa-clock"></i> No start before (UTC)</label>
+                                    <label><i class="fas fa-clock"></i> <span data-i18n="task.no_start_before">No start before (UTC)</span></label>
                                     <input type="time" id="task-no-start" class="native-time-input" value="12:00" readonly disabled>
                                 </div>
                                 <div class="task-option-field">
-                                    <label><i class="fas fa-hourglass-half"></i> Task time</label>
+                                    <label><i class="fas fa-hourglass-half"></i> <span data-i18n="task.task_time">Task time</span></label>
                                     <input type="text" id="task-time" class="native-time-input" value="03:00:00" placeholder="HH:MM:SS" readonly disabled>
                                 </div>
                             </div>
@@ -311,7 +385,7 @@
                                 <i class="fas fa-search-location"></i> <span data-i18n="task.add_waypoints_card">Add Waypoints</span>
                             </div>
                             <div style="position:relative">
-                                <sl-input id="task-wp-search" placeholder="Search by name or code..." size="small" clearable>
+                                <sl-input id="task-wp-search" placeholder="Search by name or code..." data-i18n-placeholder="task.wp_search_placeholder" size="small" clearable>
                                     <i class="fas fa-search" slot="prefix"></i>
                                 </sl-input>
                                 <div id="task-wp-results" class="task-wp-results"></div>
@@ -793,6 +867,7 @@
                                 <div id="usage-log-pagination" class="browse-pagination" style="display:flex; gap:8px; align-items:center; justify-content:center; margin-top:12px;"></div>
                             </div>
                         </sl-tab-panel>
+
                     </sl-tab-group>
                 </div>
             </sl-tab-panel>
@@ -865,10 +940,10 @@
                             <div class="admin-toolbar">
                                 <span style="flex:1; color:var(--text-secondary); font-size:.85rem;" data-i18n="mc.your_gliders">Your custom glider polars</span>
                                 <sl-button size="small" id="mc-gliders-add-btn" variant="primary">
-                                    <i class="fas fa-plus" slot="prefix"></i> Add Glider
+                                    <i class="fas fa-plus" slot="prefix"></i> <span data-i18n="mc.add_glider">Add Glider</span>
                                 </sl-button>
                                 <sl-button size="small" id="mc-gliders-refresh-btn" variant="default">
-                                    <i class="fas fa-sync-alt" slot="prefix"></i> Refresh
+                                    <i class="fas fa-sync-alt" slot="prefix"></i> <span data-i18n="btn.refresh">Refresh</span>
                                 </sl-button>
                             </div>
                             <div id="mc-gliders-loading" style="display:none; text-align:center; padding:20px;"><sl-spinner></sl-spinner></div>
@@ -877,8 +952,8 @@
                                 <table class="admin-table">
                                     <thead><tr>
                                         <th data-i18n="mc.col_name">Name</th>
-                                        <th>Speed Range</th>
-                                        <th>Max Gross</th>
+                                        <th data-i18n="mc.col_speed_range">Speed Range</th>
+                                        <th data-i18n="mc.col_max_gross">Max Gross</th>
                                         <th data-i18n="tbl.actions">Actions</th>
                                     </tr></thead>
                                     <tbody id="mc-gliders-tbody"></tbody>
@@ -1474,10 +1549,10 @@
     </div>
 
     <!-- Confirm Dialog -->
-    <sl-dialog id="confirm-modal" label="Confirm" style="--width: 420px;">
+    <sl-dialog id="confirm-modal" label="Confirm" data-i18n-label="confirm.title" style="--width: 420px;">
         <p id="confirm-modal-message"></p>
-        <sl-button slot="footer" variant="neutral" id="confirm-modal-cancel">Cancel</sl-button>
-        <sl-button slot="footer" variant="danger" id="confirm-modal-ok">OK</sl-button>
+        <sl-button slot="footer" variant="neutral" id="confirm-modal-cancel" data-i18n="btn.cancel">Cancel</sl-button>
+        <sl-button slot="footer" variant="danger" id="confirm-modal-ok" data-i18n="confirm.ok">OK</sl-button>
     </sl-dialog>
 
     <!-- Loading Overlay -->
@@ -1487,22 +1562,6 @@
             <p>Loading...</p>
         </div>
     </div>
-
-    <!-- XCSoar Repository Dialog -->
-    <sl-dialog id="xcsoar-repo-modal" label="XCSoar Repository" style="--width: 640px;">
-        <div class="xcsoar-repo-body">
-            <div class="xcsoar-repo-filters">
-                <select id="xcsoar-repo-type">
-                    <option value="">All types</option>
-                    <option value="waypoint">Waypoints</option>
-                    <option value="airspace">Airspace</option>
-                </select>
-                <input type="text" id="xcsoar-repo-search" placeholder="Search by country or name&hellip;" autocomplete="off">
-            </div>
-            <div id="xcsoar-repo-status" class="xcsoar-repo-status" style="display:none;"></div>
-            <div id="xcsoar-repo-list" class="xcsoar-repo-list"></div>
-        </div>
-    </sl-dialog>
 
     <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -1516,5 +1575,6 @@
     <script src="{{ url_for('static', filename='js/ai-planner.js') }}"></script>
     <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
     <script src="{{ url_for('static', filename='js/my-content.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/waypoint-gen.js') }}"></script>
 </body>
 </html>
