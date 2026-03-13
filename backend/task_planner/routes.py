@@ -688,13 +688,15 @@ def generate_task():
 
         max_duration = float(data.get("max_duration_hours", 4.0))
 
-        # ── 3a. Parse preferred waypoints from custom instructions ────────
+        # ── 3a. Parse preferred waypoints and TP count from custom instructions
         preferred_waypoints: list[tuple[float, float]] = []
+        requested_tp_count: int | None = None
         custom_instr = inputs_snapshot.get("custom_instructions", "")
         if custom_instr:
             preferred_waypoints = _parse_waypoints_from_instructions(
                 custom_instr, takeoff["lat"], takeoff["lon"], target_km,
             )
+            requested_tp_count = _parse_turnpoint_count(custom_instr)
 
         top_candidates = optimize_task(
             takeoff["lat"], takeoff["lon"],
@@ -709,6 +711,7 @@ def generate_task():
             takeoff_hour=takeoff_hour,
             max_duration_hours=max_duration,
             preferred_waypoints=preferred_waypoints or None,
+            requested_tp_count=requested_tp_count,
         )
         g._aip_external_calls["candidates"] = len(top_candidates)
 
@@ -824,6 +827,43 @@ def generate_task():
 
 
 # ── Helper functions ─────────────────────────────────────────────────────────
+
+def _parse_turnpoint_count(instructions: str) -> int | None:
+    """Extract a requested turnpoint count from custom instructions.
+
+    Supports patterns like '4 turnpoints', '3 TP', 'trzy punkty zwrotne', etc.
+    Returns None if no count is found.
+    """
+    import re as _re
+
+    # Digit-based patterns (EN, PL, DE, CS)
+    digit_match = _re.search(
+        r'(\d+)\s*(?:turn\s*points?|TPs?|punkty?\s*zwrotn[ey]|Wendepunkt[en]*|otočn[éý]ch?\s*bod[ůu]?)',
+        instructions,
+        _re.IGNORECASE,
+    )
+    if digit_match:
+        n = int(digit_match.group(1))
+        if 1 <= n <= 10:
+            return n
+
+    # Word-based numbers (EN + PL)
+    _word_numbers = {
+        'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6,
+        'jeden': 1, 'dwa': 2, 'trzy': 3, 'cztery': 4, 'pięć': 5, 'sześć': 6,
+        'zwei': 2, 'drei': 3, 'vier': 4, 'fünf': 5, 'sechs': 6,
+        'dva': 2, 'tři': 3, 'čtyři': 4, 'pět': 5, 'šest': 6,
+    }
+    for word, num in _word_numbers.items():
+        if _re.search(
+            rf'\b{_re.escape(word)}\b\s*(?:turn\s*points?|TPs?|punkty?\s*zwrotn[ey]|Wendepunkt[en]*|otočn[éý]ch?\s*bod[ůu]?)',
+            instructions,
+            _re.IGNORECASE,
+        ):
+            return num
+
+    return None
+
 
 def _parse_waypoints_from_instructions(
     instructions: str,

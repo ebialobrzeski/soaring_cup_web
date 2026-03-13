@@ -338,14 +338,19 @@ AIRSPACE SAFETY (CRITICAL):
   the route for conservative and standard safety profiles.
 
 ROUTE TYPE GUIDANCE:
-- For conservative/standard safety: STRONGLY prefer triangle routes. \
-  Triangle routes keep the pilot within glide range of the takeoff airport. \
+- Routes may have any number of turnpoints (1 = out-and-return, 2 = triangle, \
+  3 = quadrilateral, 4+ = polygon). The optimizer generates candidates with \
+  varying turnpoint counts based on task distance, weather, and pilot preferences.
+- For conservative/standard safety: STRONGLY prefer closed-circuit multi-turnpoint \
+  routes (triangles, quadrilaterals, etc.). These keep the pilot within glide range. \
   Out-and-return routes leave the pilot far from base on a single leg. \
-  Only recommend O&R if no viable triangle exists.
+  Only recommend O&R if no viable multi-TP route exists.
 - For aggressive safety: pilot accepts more risk, O&R is acceptable.
-- Legs should NOT all be the same length. Prefer asymmetric triangles: \
+- Legs should NOT all be the same length. Prefer asymmetric routes: \
   short first leg into the wind, long second leg with tailwind, medium return. \
   This keeps the pilot close to home during the hardest (upwind) portion.
+- If the pilot requested a specific number of turnpoints in their custom \
+  instructions, STRONGLY prefer candidates matching that count.
 
 TURNPOINT NAMING: Turnpoints are labeled with the nearest town or city name. \
 Always refer to turnpoints by their town name in the narrative (e.g., "Leg 1: \

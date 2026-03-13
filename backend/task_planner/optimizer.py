@@ -161,8 +161,115 @@ def calculate_wind_components(
 
 
 # ---------------------------------------------------------------------------
-# Candidate generation — radial sweep + triangle/out-and-return
+# Smart turnpoint-count suggestion
 # ---------------------------------------------------------------------------
+
+def suggest_tp_count(
+    target_km: float,
+    avg_wind_kts: Optional[float] = None,
+    safety_profile: str = "standard",
+) -> list[int]:
+    """Suggest sensible turnpoint counts based on task distance and conditions.
+
+    Returns a *list* of TP counts to generate candidates for.
+    Shorter tasks favour fewer TPs; longer tasks favour more.
+    Strong wind nudges towards fewer TPs (simpler navigation).
+    Conservative safety also nudges towards fewer TPs.
+    """
+    # Base suggestions by distance
+    if target_km < 80:
+        base = [1, 2]
+    elif target_km < 150:
+        base = [2, 3]
+    elif target_km < 250:
+        base = [2, 3, 4]
+    elif target_km < 400:
+        base = [3, 4, 5]
+    else:
+        base = [3, 4, 5, 6]
+
+    # Strong wind → prefer fewer TPs (simpler route)
+    if avg_wind_kts is not None and avg_wind_kts > 18:
+        base = [n for n in base if n <= 3] or [2]
+
+    # Conservative safety → cap at 4 TPs
+    if safety_profile == "conservative":
+        base = [n for n in base if n <= 4] or [2]
+
+    return sorted(set(base))
+
+
+# ---------------------------------------------------------------------------
+# Candidate generation — flexible N-turnpoint polygon + legacy helpers
+# ---------------------------------------------------------------------------
+
+def _generate_polygon_route(
+    takeoff_lat: float, takeoff_lon: float,
+    target_km: float,
+    n_turnpoints: int,
+    base_bearing: float,
+) -> list[tuple[float, float]]:
+    """Generate one closed N-turnpoint polygon route.
+
+    Places *n_turnpoints* turnpoints around the takeoff at roughly equal
+    angular spacing, with leg lengths summing to *target_km*.  The first
+    leg follows *base_bearing* (degrees true north).
+    """
+    # Approximate individual leg length
+    n_legs = n_turnpoints + 1  # TP1→TP2→…→home
+    # Inscribed-polygon approach: place TPs on a circle so total perimeter ≈ target_km
+    # Perimeter of regular (n_turnpoints+1)-gon inscribed in circle of radius R:
+    #   P = 2 * (n_tp+1) * R * sin(π / (n_tp+1))
+    #   R = target_km / (2 * n_legs * sin(π / n_legs))
+    if n_legs < 2:
+        n_legs = 2
+    radius_km = target_km / (2.0 * n_legs * math.sin(math.pi / n_legs))
+
+    points: list[tuple[float, float]] = [(takeoff_lat, takeoff_lon)]
+    angle_step = 360.0 / n_legs
+    for i in range(n_turnpoints):
+        bearing = (base_bearing + angle_step * (i + 1)) % 360
+        tp = _destination(takeoff_lat, takeoff_lon, bearing, radius_km)
+        points.append(tp)
+    points.append((takeoff_lat, takeoff_lon))  # close the polygon
+
+    # Rescale so total perimeter ≈ target_km
+    raw_total = _route_distance_pts(points)
+    if raw_total > 0:
+        scale = target_km / raw_total
+        rescaled: list[tuple[float, float]] = [(takeoff_lat, takeoff_lon)]
+        for i in range(1, len(points) - 1):
+            bearing = _bearing(takeoff_lat, takeoff_lon, points[i][0], points[i][1])
+            dist = _haversine(takeoff_lat, takeoff_lon, points[i][0], points[i][1]) * scale
+            rescaled.append(_destination(takeoff_lat, takeoff_lon, bearing, dist))
+        rescaled.append((takeoff_lat, takeoff_lon))
+        return rescaled
+    return points
+
+
+def _route_distance_pts(points: list[tuple[float, float]]) -> float:
+    """Total route distance (km) — lightweight version for generation."""
+    total = 0.0
+    for i in range(len(points) - 1):
+        total += _haversine(points[i][0], points[i][1], points[i + 1][0], points[i + 1][1])
+    return total
+
+
+def _generate_n_tp_routes(
+    takeoff_lat: float, takeoff_lon: float,
+    target_km: float,
+    n_turnpoints: int,
+    n_rotations: int = 8,
+) -> list[list[tuple[float, float]]]:
+    """Generate regular-polygon candidates for *n_turnpoints* TPs."""
+    routes: list[list[tuple[float, float]]] = []
+    for i in range(n_rotations):
+        base_bearing = (360.0 / n_rotations) * i
+        routes.append(_generate_polygon_route(
+            takeoff_lat, takeoff_lon, target_km, n_turnpoints, base_bearing,
+        ))
+    return routes
+
 
 def _generate_out_and_return(
     takeoff_lat: float, takeoff_lon: float,
@@ -267,11 +374,19 @@ def generate_candidates(
     dest_lat: Optional[float] = None,
     dest_lon: Optional[float] = None,
     soaring_mode: str = "thermal",
+    requested_tp_count: Optional[int] = None,
+    tp_counts: Optional[list[int]] = None,
 ) -> list[list[tuple[float, float]]]:
     """Generate all candidate turnpoint sets.
 
     Returns list of routes, each route being a list of (lat, lon) waypoints
     starting and ending at takeoff/destination.
+
+    If *requested_tp_count* is given (e.g. user asked for "4 turnpoints"),
+    candidates are heavily biased towards that count.  Otherwise the
+    *tp_counts* list (from suggest_tp_count) controls which TP counts are
+    generated.  When neither is supplied the legacy O&R + triangle mix is
+    used.
     """
     candidates: list[list[tuple[float, float]]] = []
 
@@ -281,15 +396,42 @@ def generate_candidates(
     )
 
     if same_airport:
-        # Out-and-return + triangles
-        candidates.extend(_generate_out_and_return(takeoff_lat, takeoff_lon, target_km, 8))
-        candidates.extend(_generate_triangles(takeoff_lat, takeoff_lon, target_km, 6))
-        candidates.extend(_generate_fai_triangles(takeoff_lat, takeoff_lon, target_km, 4))
+        if requested_tp_count is not None:
+            # User explicitly asked for N turnpoints — focus on that count
+            # but also add a few neighbours for the LLM to compare
+            primary = requested_tp_count
+            counts = sorted({max(1, primary - 1), primary, primary + 1})
+            for n_tp in counts:
+                n_rot = 12 if n_tp == primary else 4
+                if n_tp == 1:
+                    candidates.extend(_generate_out_and_return(takeoff_lat, takeoff_lon, target_km, n_rot))
+                elif n_tp == 2:
+                    candidates.extend(_generate_triangles(takeoff_lat, takeoff_lon, target_km, n_rot))
+                    candidates.extend(_generate_fai_triangles(takeoff_lat, takeoff_lon, target_km, min(n_rot, 6)))
+                else:
+                    candidates.extend(_generate_n_tp_routes(takeoff_lat, takeoff_lon, target_km, n_tp, n_rot))
+        elif tp_counts:
+            # Smart-suggested counts (no explicit user request)
+            for n_tp in tp_counts:
+                if n_tp == 1:
+                    candidates.extend(_generate_out_and_return(takeoff_lat, takeoff_lon, target_km, 8))
+                elif n_tp == 2:
+                    candidates.extend(_generate_triangles(takeoff_lat, takeoff_lon, target_km, 6))
+                    candidates.extend(_generate_fai_triangles(takeoff_lat, takeoff_lon, target_km, 4))
+                else:
+                    candidates.extend(_generate_n_tp_routes(takeoff_lat, takeoff_lon, target_km, n_tp, 8))
+        else:
+            # Legacy fallback
+            candidates.extend(_generate_out_and_return(takeoff_lat, takeoff_lon, target_km, 8))
+            candidates.extend(_generate_triangles(takeoff_lat, takeoff_lon, target_km, 6))
+            candidates.extend(_generate_fai_triangles(takeoff_lat, takeoff_lon, target_km, 4))
     else:
-        # Sector routes between airports + some triangles from takeoff
+        # Sector routes between airports + variable TP counts
         candidates.extend(
             _generate_sector_routes(takeoff_lat, takeoff_lon, dest_lat, dest_lon, target_km, 12)
         )
+        if requested_tp_count and requested_tp_count >= 3:
+            candidates.extend(_generate_n_tp_routes(takeoff_lat, takeoff_lon, target_km, requested_tp_count, 8))
         candidates.extend(_generate_triangles(takeoff_lat, takeoff_lon, target_km, 8))
 
     return candidates
@@ -349,12 +491,15 @@ def _generate_waypoint_routes(
     waypoints: list[tuple[float, float]],
     dest_lat: Optional[float] = None,
     dest_lon: Optional[float] = None,
+    requested_tp_count: Optional[int] = None,
 ) -> list[list[tuple[float, float]]]:
     """Generate candidate routes that pass through specific waypoints.
 
     For each preferred waypoint, generates:
     - Out-and-return through that waypoint
-    - Triangles using that waypoint as one turnpoint (8 rotations for TP2)
+    - Triangles using that waypoint as one turnpoint (8 rotations)
+    - N-TP routes with the waypoint as one TP and remaining TPs generated
+      geometrically (when *requested_tp_count* >= 3)
     """
     same_airport = (
         dest_lat is None or dest_lon is None
@@ -400,8 +545,26 @@ def _generate_waypoint_routes(
                     (takeoff_lat, takeoff_lon),
                 ])
 
-    logger.info("Generated %d waypoint-based candidates for %d preferred waypoints",
-                len(routes), len(waypoints))
+            # N-TP routes (3+ TPs) — anchor waypoint, fill remaining TPs
+            n_tp = requested_tp_count or 0
+            if n_tp >= 3:
+                extra_tps_needed = n_tp - 1  # we already have the preferred WP
+                for rot in range(8):
+                    pts: list[tuple[float, float]] = [(takeoff_lat, takeoff_lon), wp]
+                    angle_step = 360.0 / (n_tp + 1)
+                    base = (bearing_from_home + 90 + (360.0 / 8) * rot) % 360
+                    filler_dist = max(remaining_dist / (extra_tps_needed + 1), 10)
+                    prev = wp
+                    for k in range(extra_tps_needed):
+                        tp_bearing = (base + angle_step * (k + 1)) % 360
+                        nxt = _destination(prev[0], prev[1], tp_bearing, filler_dist)
+                        pts.append(nxt)
+                        prev = nxt
+                    pts.append((takeoff_lat, takeoff_lon))
+                    routes.append(pts)
+
+    logger.info("Generated %d waypoint-based candidates for %d preferred waypoints (requested_tp=%s)",
+                len(routes), len(waypoints), requested_tp_count)
     return routes
 
 
@@ -503,6 +666,7 @@ def score_candidate(
     timed_cells: Optional[dict] = None,
     takeoff_hour: float = 11.0,
     max_duration_hours: float = 4.0,
+    requested_tp_count: Optional[int] = None,
 ) -> CandidateRoute:
     """Score a single candidate route.
 
@@ -703,23 +867,36 @@ def score_candidate(
 
     # 6. Route-type preference based on safety profile (bonus/penalty)
     is_out_and_return = (len(points) == 3 and points[0] == points[2])
-    is_triangle = (len(points) >= 4 and points[0] == points[-1])
+    is_closed_circuit = (len(points) >= 4 and points[0] == points[-1])
+    n_tps = len(points) - 2 if is_closed_circuit else (1 if is_out_and_return else 0)
 
     route_type_bonus = 0.0
     if safety_profile in ("conservative", "standard"):
-        if is_triangle:
+        if is_closed_circuit:
             route_type_bonus = 15.0 if safety_profile == "conservative" else 10.0
-            logger.debug("Triangle route +%.0f bonus (safety=%s)", route_type_bonus, safety_profile)
+            logger.debug("Closed-circuit %d-TP route +%.0f bonus (safety=%s)",
+                         n_tps, route_type_bonus, safety_profile)
         elif is_out_and_return:
             route_type_bonus = -10.0 if safety_profile == "conservative" else -5.0
             logger.debug("Out-and-return %.0f penalty (safety=%s)", route_type_bonus, safety_profile)
+
+    # Bonus when route matches the user's requested TP count
+    if requested_tp_count is not None:
+        if n_tps == requested_tp_count:
+            route_type_bonus += 20.0
+            logger.debug("Requested TP count match (%d) +20 bonus", requested_tp_count)
+        else:
+            diff = abs(n_tps - requested_tp_count)
+            route_type_bonus -= diff * 5.0
+            logger.debug("TP count mismatch (%d vs %d) -%d penalty",
+                         n_tps, requested_tp_count, diff * 5)
     total_score += route_type_bonus
 
-    # 7. Leg asymmetry bonus (0-15 pts) — directly reward triangles with unequal legs
+    # 7. Leg asymmetry bonus (0-15 pts) — reward multi-TP routes with unequal legs
     # Coefficient of variation (CV) of leg lengths: 0 for equilateral, ~0.25+ for asymmetric.
     # This is the primary differentiator when wind data is missing.
     asymmetry_bonus = 0.0
-    if is_triangle and len(legs) >= 3 and safety_profile in ("conservative", "standard"):
+    if is_closed_circuit and len(legs) >= 3 and safety_profile in ("conservative", "standard"):
         leg_dists = [l.distance_km for l in legs]
         mean_dist = sum(leg_dists) / len(leg_dists)
         if mean_dist > 0:
@@ -746,10 +923,12 @@ def score_candidate(
 
     # Build description
     tp_names = [f"({p[0]:.2f}, {p[1]:.2f})" for p in points[1:-1]] if len(points) > 2 else []
+    _shape_names = {2: "Triangle", 3: "Quadrilateral", 4: "Pentagon", 5: "Hexagon"}
     if is_out_and_return:
         route.description = f"Out-and-return via {tp_names[0] if tp_names else '?'}, {total_dist:.0f}km"
-    elif is_triangle:
-        route.description = f"Triangle via {', '.join(tp_names)}, {total_dist:.0f}km"
+    elif is_closed_circuit:
+        shape = _shape_names.get(n_tps, f"{n_tps}-TP circuit")
+        route.description = f"{shape} via {', '.join(tp_names)}, {total_dist:.0f}km"
     else:
         route.description = f"Task with {len(tp_names)} TP(s), {total_dist:.0f}km"
 
@@ -1031,6 +1210,7 @@ def optimize_task(
     takeoff_hour: float = 11.0,
     max_duration_hours: float = 4.0,
     preferred_waypoints: Optional[list[tuple[float, float]]] = None,
+    requested_tp_count: Optional[int] = None,
 ) -> list[CandidateRoute]:
     """Generate and score candidate routes, return top N.
 
@@ -1049,18 +1229,38 @@ def optimize_task(
         takeoff_hour: estimated takeoff hour (local time)
         max_duration_hours: expected flight duration
         preferred_waypoints: list of (lat, lon) that the user wants in the route
+        requested_tp_count: explicit turnpoint count requested by user (None = auto)
     """
+    # Determine average wind for smart TP count suggestion
+    avg_wind_dir = _average_wind_direction(weather_cells)
+    avg_wind_kts: Optional[float] = None
+    if weather_cells:
+        wind_vals = [c.wind_speed_kts for c in weather_cells
+                     if c.wind_speed_kts is not None and c.wind_speed_kts > 0]
+        if wind_vals:
+            avg_wind_kts = sum(wind_vals) / len(wind_vals)
+
+    # Smart TP count — used when user didn't specify
+    tp_counts: Optional[list[int]] = None
+    if requested_tp_count is None:
+        tp_counts = suggest_tp_count(target_km, avg_wind_kts, safety_profile)
+        logger.info("Smart TP count suggestion for %.0fkm (wind=%.0fkt, safety=%s): %s",
+                    target_km, avg_wind_kts or 0, safety_profile, tp_counts)
+    else:
+        logger.info("User requested %d turnpoints", requested_tp_count)
+
     raw_candidates = generate_candidates(
         takeoff_lat, takeoff_lon, target_km,
         dest_lat=dest_lat, dest_lon=dest_lon,
         soaring_mode=soaring_mode,
+        requested_tp_count=requested_tp_count,
+        tp_counts=tp_counts,
     )
 
     # Generate asymmetric triangle candidates — ALWAYS, not just when wind is known.
     # When wind is available, candidates cluster around the upwind direction.
     # When wind is missing, candidates cover all bearings so the proximity-to-home
     # and asymmetric-leg scoring advantages still differentiate them from equilateral.
-    avg_wind_dir = _average_wind_direction(weather_cells)
     same_airport = (
         dest_lat is None or dest_lon is None
         or _haversine(takeoff_lat, takeoff_lon, dest_lat or 0, dest_lon or 0) < 5
@@ -1081,15 +1281,18 @@ def optimize_task(
             takeoff_lat, takeoff_lon, target_km, preferred_waypoints,
             dest_lat=dest_lat if not same_airport else None,
             dest_lon=dest_lon if not same_airport else None,
+            requested_tp_count=requested_tp_count,
         )
         raw_candidates.extend(wp_routes)
 
     n_oar = sum(1 for c in raw_candidates if len(c) == 3 and c[0] == c[2])
-    n_tri = sum(1 for c in raw_candidates if len(c) >= 4 and c[0] == c[-1])
-    n_other = len(raw_candidates) - n_oar - n_tri
+    n_closed = sum(1 for c in raw_candidates if len(c) >= 4 and c[0] == c[-1])
+    n_other = len(raw_candidates) - n_oar - n_closed
     logger.info(
-        "Generated %d raw candidates: %d out-and-return, %d triangles, %d other (safety=%s)",
-        len(raw_candidates), n_oar, n_tri, n_other, safety_profile,
+        "Generated %d raw candidates: %d out-and-return, %d closed-circuit, %d other "
+        "(safety=%s, requested_tp=%s, smart_tp=%s)",
+        len(raw_candidates), n_oar, n_closed, n_other, safety_profile,
+        requested_tp_count, tp_counts,
     )
 
     # Max distance from home — safety constraint
@@ -1154,6 +1357,7 @@ def optimize_task(
             timed_cells=timed_cells,
             takeoff_hour=takeoff_hour,
             max_duration_hours=max_duration_hours,
+            requested_tp_count=requested_tp_count,
         )
         scored.append(route)
 
