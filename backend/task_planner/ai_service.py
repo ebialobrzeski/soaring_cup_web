@@ -142,7 +142,7 @@ def _call_openrouter(prompt: str, system: str = "", api_key_override: str = "") 
         "route": "fallback",
         "messages": messages,
         "temperature": 0.3,
-        "max_tokens": 4096,
+        "max_tokens": 12288,
         "response_format": {"type": "json_object"},
     }
 
@@ -263,7 +263,7 @@ def _call_gemini_direct(prompt: str, system: str = "") -> str:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
     body: dict[str, Any] = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096, "responseMimeType": "application/json"},
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 12288, "responseMimeType": "application/json"},
     }
     if system:
         body["systemInstruction"] = {"parts": [{"text": system}]}
@@ -285,7 +285,7 @@ def _call_groq_direct(prompt: str, system: str = "") -> str:
     resp = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
         headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-        json={"model": "llama-3.3-70b-versatile", "messages": messages, "temperature": 0.3, "max_tokens": 4096, "response_format": {"type": "json_object"}},
+        json={"model": "llama-3.3-70b-versatile", "messages": messages, "temperature": 0.3, "max_tokens": 12288, "response_format": {"type": "json_object"}},
         timeout=60,
     )
     resp.raise_for_status()
@@ -300,7 +300,7 @@ def _call_deepseek_direct(prompt: str, system: str = "") -> str:
     resp = requests.post(
         "https://api.deepseek.com/chat/completions",
         headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
-        json={"model": "deepseek-chat", "messages": messages, "temperature": 0.3, "max_tokens": 4096, "response_format": {"type": "json_object"}},
+        json={"model": "deepseek-chat", "messages": messages, "temperature": 0.3, "max_tokens": 12288, "response_format": {"type": "json_object"}},
         timeout=60,
     )
     resp.raise_for_status()
@@ -314,11 +314,14 @@ def _call_deepseek_direct(prompt: str, system: str = "") -> str:
 _SYSTEM_PROMPT = """You are an expert gliding meteorologist and cross-country flight planner \
 with 20+ years soaring experience in Central Europe (Poland).
 
-ROLE: Analyze weather data and candidate routes to select the best route \
-and write an actionable pilot briefing. You receive routes PRE-SCORED by \
-an optimizer. Your job is primarily to provide NARRATIVE and WEATHER ANALYSIS, \
-not to second-guess the optimizer's scoring. Only override the top-scored route \
-if you identify a specific meteorological danger the optimizer missed.
+ROLE: You are the ROUTE DESIGNER. Given weather data, available waypoints, \
+airspace restrictions, and pilot preferences, you must DESIGN optimal \
+soaring routes and write an actionable pilot briefing. You propose the \
+turnpoints, choose the route geometry, and explain why.
+
+YOU MUST PROPOSE 1 OPTIMAL ROUTE using the provided waypoints. The route must \
+use real waypoint coordinates from the AVAILABLE WAYPOINTS list. Do not \
+invent coordinates — only use waypoints provided to you.
 
 TEMPORAL AWARENESS: Weather data is labeled by time window:
 - [morning] = 09:00-12:00 — thermal development, cumulus forming
@@ -329,79 +332,54 @@ advise the pilot accordingly (e.g., "complete the furthest leg by 14:00 \
 before afternoon overdevelopment").
 
 AIRSPACE SAFETY (CRITICAL):
-- NEVER select a route that enters RESTRICTED (EPTR*), PROHIBITED (EPPR*), \
-  or DANGER (EPDA*) airspace zones. If any candidate leg has airspace conflicts \
-  marked with suggestion "avoid", that route MUST NOT be selected.
-- If ALL candidate routes have blocking airspace conflicts, say so explicitly \
-  and recommend the pilot consult with ATC or choose a different area.
-- Check the per-leg airspace_conflicts count — even 1 "avoid" conflict disqualifies \
-  the route for conservative and standard safety profiles.
+- You are given a list of AIRSPACE ZONES with their types and altitude limits.
+- NEVER route through RESTRICTED, PROHIBITED, or DANGER zones.
+- Give a wide berth (2+ km) to CTR and TMA zones unless the pilot can \
+  reasonably transit them (class D/E with radio).
+- If you cannot avoid all restricted airspace, say so explicitly and \
+  recommend the pilot consult with ATC.
 
-ROUTE TYPE GUIDANCE:
-- Routes may have any number of turnpoints (1 = out-and-return, 2 = triangle, \
-  3 = quadrilateral, 4+ = polygon). The optimizer generates candidates with \
-  varying turnpoint counts based on task distance, weather, and pilot preferences.
-- For conservative/standard safety: STRONGLY prefer closed-circuit multi-turnpoint \
-  routes (triangles, quadrilaterals, etc.). These keep the pilot within glide range. \
-  Out-and-return routes leave the pilot far from base on a single leg. \
-  Only recommend O&R if no viable multi-TP route exists.
-- For aggressive safety: pilot accepts more risk, O&R is acceptable.
-- Legs should NOT all be the same length. Prefer asymmetric routes: \
+ROUTE DESIGN PRINCIPLES:
+- All routes must be CLOSED CIRCUITS returning to the takeoff airport.
+- For conservative/standard safety: STRONGLY prefer triangles (2 TPs) or \
+  quadrilaterals (3 TPs). These keep the pilot within glide range of home.
+- Out-and-return (1 TP) is acceptable ONLY for aggressive safety or if no \
+  multi-TP route is viable.
+- Legs should NOT all be the same length. Use asymmetric routes: \
   short first leg into the wind, long second leg with tailwind, medium return. \
   This keeps the pilot close to home during the hardest (upwind) portion.
-- If the pilot requested a specific number of turnpoints in their custom \
-  instructions, STRONGLY prefer candidates matching that count.
+- The furthest-from-home leg should be flown during peak thermal hours (12:00-15:00).
+- Prefer turnpoints that are near landable airports when possible.
+- For the target distance: routes should total within ±15% of the requested distance.
 
-TURNPOINT NAMING: Turnpoints are labeled with the nearest town or city name. \
-Always refer to turnpoints by their town name in the narrative (e.g., "Leg 1: \
-Takeoff → Rawicz" not "Leg 1: Takeoff → TP1"). Larger towns and cities are \
-preferred because they are easy to spot from the air. When describing legs, \
-mention recognisable landmarks (rivers, lakes, motorways, large forests) that \
-help the pilot confirm they are on track.
+WAYPOINT SELECTION:
+- Choose turnpoints from the AVAILABLE WAYPOINTS list provided.
+- Prefer cities/towns that are easy to identify from the air.
+- Airports make excellent turnpoints — they provide emergency landing options.
+- Consider weather at each waypoint (thermal strength, cloud base, wind).
+- Reference turnpoints by their name in the narrative. Also mention \
+  recognisable landmarks along each leg (rivers, lakes, motorways, forests).
 
 RESPONSE LANGUAGE: Write ALL narrative text (explanation, weather_summary, \
 safety_notes) in the language specified by the RESPONSE LANGUAGE field. \
 Return only ONE version — do not duplicate in multiple languages.
 
-SCORING CRITERIA (total 100 pts):
-- Thermal Strength: 40 pts
-- Cloud Base: 30 pts
-- Wind: 20 pts
-- Thermal Index: 10 pts
+WEATHER INTERPRETATION:
+CAPE: >2000 J/kg = excellent thermals, 1000-2000 = good, 400-1000 = moderate, <400 = weak
+Lapse rate: >3°C/1000ft = excellent, 2-3 = good, 1-2 = weak, <1 = stable
+Cloud base: >6000ft = excellent, 4000-6000ft = very good, 2500-4000ft = moderate, \
+1500-2500ft = marginal, <1500ft = poor
+Wind: 0-8kt = ideal, 8-12kt = good, 12-18kt = acceptable, 18-25kt = challenging, >25kt = dangerous
 
-CAPE interpretation:
-- >2000 J/kg = excellent thermals
-- 1500-2000 = strong
-- 1000-1500 = good
-- 700-1000 = moderate
-- 400-700 = weak
-- <400 = very weak
-
-Lapse rate thresholds:
-- >3°C/1000ft = very unstable, excellent thermals
-- 2-3 = unstable, good thermals
-- 1-2 = neutral, weak thermals
-- <1 = stable, no thermals
-
-Cloud base scoring:
-- >6000ft = excellent (+30)
-- 4000-6000ft = very good (+25)
-- 2500-4000ft = moderate (+20)
-- 1500-2500ft = marginal (+10)
-- <1500ft = poor (+0)
-
-Wind scoring:
-- 0-8 kts = ideal (+20)
-- 8-12 kts = very good (+16)
-- 12-18 kts = acceptable (+10)
-- 18-25 kts = challenging (+5)
-- >25 kts = dangerous (+0); gusts >15 kts = -20 pts
+SCORING: Rate the proposed route 0-100 based on:
+- Thermal conditions along route: 40 pts
+- Cloud base adequacy: 20 pts
+- Wind favourability (tailwind on long legs): 20 pts
+- Safety (airspace clearance, landable options): 20 pts
 
 PILOT CUSTOM INSTRUCTIONS: If the prompt contains a "PILOT CUSTOM INSTRUCTIONS" \
-section, you MUST incorporate those preferences into your route selection and \
-narrative. For example, if the pilot requests a specific turnpoint, prefer the \
-candidate route that passes closest to it and explain this in the narrative. \
-If no candidate matches the instruction, acknowledge it and explain why.
+section, those preferences have HIGHEST PRIORITY. Design the route to satisfy them. \
+If the route cannot fully satisfy the instructions, explain why.
 
 Return ONLY valid JSON. No commentary outside the JSON."""
 
@@ -443,130 +421,162 @@ _LANG_NAMES = {"en": "English", "pl": "Polish", "de": "German", "cs": "Czech"}
 
 
 def _build_task_prompt(
-    candidates: list[dict],
+    waypoints: list[dict],
     weather_summary: list[str],
     task_inputs: dict,
-    airspace_info: Optional[dict] = None,
-    terrain_info: Optional[dict] = None,
+    airspace_zones: list[dict] | None = None,
+    terrain_info: dict | None = None,
     language: str = "en",
     custom_instructions: str = "",
 ) -> str:
-    """Build the prompt for final task selection and narrative."""
+    """Build the prompt for AI route design and narrative.
+
+    The AI receives available waypoints, weather, airspace, and constraints,
+    and proposes 3 routes using the provided waypoints.
+    """
     safety = task_inputs.get('safety_profile', 'standard')
     lang_name = _LANG_NAMES.get(language, "English")
+    takeoff_name = task_inputs.get('takeoff_airport', 'unknown')
+    takeoff_lat = task_inputs.get('takeoff_lat', 0)
+    takeoff_lon = task_inputs.get('takeoff_lon', 0)
+
     lines = [
         f"TASK REQUEST: {task_inputs.get('target_distance_km', 100)}km "
-        f"{task_inputs.get('soaring_mode', 'thermal')} flight from "
-        f"{task_inputs.get('takeoff_airport', 'unknown')}",
+        f"{task_inputs.get('soaring_mode', 'thermal')} flight",
+        f"TAKEOFF: {takeoff_name} ({takeoff_lat:.4f}N, {takeoff_lon:.4f}E)",
         f"DATE: {task_inputs.get('flight_date', 'N/A')}",
         f"SAFETY PROFILE: {safety}",
         f"RESPONSE LANGUAGE: {lang_name}",
     ]
 
+    if task_inputs.get('max_duration_hours'):
+        lines.append(f"MAX DURATION: {task_inputs['max_duration_hours']}h")
+    if task_inputs.get('takeoff_time'):
+        lines.append(f"PLANNED TAKEOFF TIME: {task_inputs['takeoff_time']}")
+
     # User custom instructions — placed early so the model weighs them heavily
     if custom_instructions:
         lines.append('')
-        lines.append('PILOT CUSTOM INSTRUCTIONS (MUST be respected when selecting and describing the route):')
+        lines.append('PILOT CUSTOM INSTRUCTIONS (HIGHEST PRIORITY — design routes that satisfy these):')
         lines.append(custom_instructions)
 
     # Add safety profile guidance
     if safety == "conservative":
-        lines.append("SAFETY GUIDANCE: Pilot wants MAXIMUM safety. Strongly prefer "
+        lines.append("")
+        lines.append("SAFETY GUIDANCE: Pilot wants MAXIMUM safety. Design "
                       "triangle/multi-leg routes that keep within glide range of takeoff. "
                       "First leg MUST face into the wind so the return has tailwind. "
-                      "Do NOT select out-and-return routes unless all triangles are unflyable.")
+                      "Prefer turnpoints near landable airports.")
     elif safety == "standard":
-        lines.append("SAFETY GUIDANCE: Balanced safety. Prefer triangle routes over "
-                      "out-and-return. Starting into wind is recommended but not mandatory.")
+        lines.append("")
+        lines.append("SAFETY GUIDANCE: Balanced safety. Prefer triangle routes. "
+                      "Starting into wind is recommended but not mandatory.")
+    else:
+        lines.append("")
+        lines.append("SAFETY GUIDANCE: Aggressive — pilot accepts higher risk. "
+                      "Out-and-return and longer routes are acceptable.")
 
     # Weather summary with time-window labels
     lines.append("")
-    lines.append("WEATHER CONDITIONS (grid cell summaries, time-bucketed where available):")
-    for ws in weather_summary[:40]:
+    lines.append("═══ WEATHER CONDITIONS ═══")
+    for ws in weather_summary:
         lines.append(f"  {ws}")
 
-    # Detailed airspace context per-candidate
-    if airspace_info:
+    # Airspace zones — describe each zone so the AI can route around them
+    if airspace_zones:
         lines.append("")
-        lines.append(f"AIRSPACE OVERVIEW: {airspace_info.get('zones_count', 0)} zones in area, "
-                      f"{airspace_info.get('conflicts', 0)} conflicts detected")
-        if airspace_info.get('has_blocking'):
-            lines.append("  ⚠ BLOCKING CONFLICTS DETECTED — some routes cross restricted airspace")
+        lines.append(f"═══ AIRSPACE ZONES ({len(airspace_zones)} in task area) ═══")
+        for zone in airspace_zones:
+            z_type = zone.get('type', '?')
+            z_class = zone.get('airspace_class', '?')
+            z_name = zone.get('name', '?')
+            z_lower = zone.get('lower_limit_ft', 0)
+            z_upper = zone.get('upper_limit_ft', 0)
+            # Compute zone center from polygon bounds for spatial reference
+            poly = zone.get('polygon', [])
+            if poly:
+                center_lat = sum(p[0] for p in poly) / len(poly)
+                center_lon = sum(p[1] for p in poly) / len(poly)
+                loc = f"center≈{center_lat:.2f}N {center_lon:.2f}E"
+            else:
+                loc = "location unknown"
+            blocking = "⚠ AVOID" if z_type in ('RESTRICTED', 'PROHIBITED', 'DANGER') else ""
+            lines.append(
+                f"  {z_name} | {z_type} class={z_class} | "
+                f"{z_lower}-{z_upper}ft | {loc} {blocking}"
+            )
 
     if terrain_info:
+        lines.append("")
         lines.append(f"TERRAIN: max elevation {terrain_info.get('max_terrain_m', 0)}m ASL")
 
+    # Available waypoints
     lines.append("")
-    lines.append(f"TOP {len(candidates)} CANDIDATE ROUTES (pre-scored by optimizer):")
-    for i, c in enumerate(candidates, 1):
-        lines.append(f"  Route {i}: {c.get('description', 'N/A')}")
-        lines.append(f"    Distance: {c.get('total_distance_km', 0):.1f}km, "
-                      f"Optimizer Score: {c.get('score', 0):.0f}/100")
-        legs = c.get("legs", [])
-        for j, leg in enumerate(legs):
-            leg_info = (f"    Leg {j+1}: {leg.get('from', '?')} → {leg.get('to', '?')} "
-                        f"({leg.get('distance_km', 0):.1f}km, {leg.get('bearing', 0):.0f}°)")
-            # Include per-leg weather and wind data
-            if leg.get('thermal_quality') is not None:
-                leg_info += f" thermal={leg['thermal_quality']:.1f}"
-            if leg.get('wind_component_kts') is not None:
-                hw = leg['wind_component_kts']
-                label = "headwind" if hw > 0 else "tailwind"
-                leg_info += f" {label}={abs(hw):.0f}kt"
-            if leg.get('airspace_conflicts', 0) > 0:
-                leg_info += f" ⚠{leg['airspace_conflicts']} airspace conflicts"
-            lines.append(leg_info)
+    lines.append(f"═══ AVAILABLE WAYPOINTS ({len(waypoints)} reachable from takeoff) ═══")
+    lines.append("Use ONLY these waypoints as turnpoints. Each includes distance/bearing from takeoff and local weather.")
+    for wp in waypoints:
+        lines.append(f"  {wp['summary_line']}")
 
+    # Response format
     lines.append("")
-    lines.append("IMPORTANT: You MUST select the route with the highest optimizer score "
-                 "unless you have a specific meteorological reason to override it "
-                 "(e.g., weather deterioration along that route). "
-                 "If you override, explain why in the narrative.")
+    lines.append("═══ YOUR TASK ═══")
+    lines.append("Design the BEST route using the available waypoints.")
+    lines.append("The route is a closed circuit: Takeoff → TP1 → [TP2 → ...] → Takeoff.")
     lines.append("")
-    lines.append("Analyze these routes. Return JSON with this structure:")
+    lines.append("Return JSON with this EXACT structure:")
     lines.append('{')
-    lines.append('  "selected_route": <1-based index of best route>,')
-    lines.append('  "score": <0-100 integer>,')
+    lines.append('  "route": {')
+    lines.append('    "description": "<short label, e.g. Triangle via Rawicz and Leszno>",')
+    lines.append('    "score": <0-100>,')
+    lines.append('    "turnpoints": [')
+    lines.append('      {"name": "<exact waypoint name from list>", "lat": <float>, "lon": <float>},')
+    lines.append('      {"name": "<exact waypoint name from list>", "lat": <float>, "lon": <float>}')
+    lines.append('    ]')
+    lines.append('  },')
     lines.append(f'  "explanation": "<Detailed {lang_name} narrative: weather analysis by time '
-                 'window (morning/midday/afternoon conditions), route justification, '
-                 'safety notes, thermal strategy, wind strategy, estimated XC speed. '
-                 'Reference turnpoints by their town/landmark names.>",')
-    lines.append(f'  "weather_summary": "<Brief weather overview in {lang_name} including '
-                 'how conditions change through the day (morning→midday→afternoon)>",')
+                 'window (morning/midday/afternoon), route justification, per-leg tactical '
+                 'advice (headwind/tailwind, dolphin flying, thermal strategy), landmarks '
+                 'along each leg, safety considerations. Reference turnpoints by name.>",')
+    lines.append(f'  "weather_summary": "<Thorough weather overview in {lang_name}: '
+                 'how conditions change morning→midday→afternoon, cloud base evolution, '
+                 'wind shifts, thermal strength progression, overdevelopment risk>",')
     lines.append('  "recommended_takeoff_time": "<HH:MM>",')
     lines.append('  "estimated_duration_hours": <float>,')
     lines.append('  "estimated_speed_kmh": <float>,')
-    lines.append('  "safety_notes": ["<note1>", "<note2>"]')
+    lines.append('  "safety_notes": ["<note1>", "<note2>", ...]')
     lines.append('}')
 
     return "\n".join(lines)
 
 
-def generate_task_narrative(
-    candidates: list[dict],
+def generate_task_routes(
+    waypoints: list[dict],
     weather_summary: list[str],
     task_inputs: dict,
-    airspace_info: Optional[dict] = None,
-    terrain_info: Optional[dict] = None,
+    airspace_zones: list[dict] | None = None,
+    terrain_info: dict | None = None,
     language: str = "en",
     api_key_override: str = "",
     custom_instructions: str = "",
 ) -> dict:
-    """Send top candidates to LLM for final selection and narrative.
+    """Ask the AI to design routes from available waypoints.
 
-    Returns dict with selected_route, score, explanation, etc.
-    Falls back to rule-based scoring if all AI providers fail.
+    Returns dict with routes[], weather_summary, safety_notes, etc.
+    Falls back to error result if all AI providers fail.
     """
     prompt = _build_task_prompt(
-        candidates, weather_summary, task_inputs, airspace_info, terrain_info,
+        waypoints, weather_summary, task_inputs,
+        airspace_zones=airspace_zones,
+        terrain_info=terrain_info,
         language=language,
         custom_instructions=custom_instructions,
     )
     logger.info(
-        "generate_task_narrative: %d candidates, %d weather cells, target=%skm, safety=%s",
-        len(candidates), len(weather_summary),
+        "generate_task_routes: %d waypoints, %d weather cells, target=%skm, safety=%s, prompt=%d chars",
+        len(waypoints), len(weather_summary),
         task_inputs.get('target_distance_km', '?'),
         task_inputs.get('safety_profile', '?'),
+        len(prompt),
     )
     logger.debug("Full task prompt (%d chars):\n%s", len(prompt), prompt)
 
@@ -574,44 +584,115 @@ def generate_task_narrative(
 
     if raw_text:
         parsed = safe_json_parse(raw_text)
-        if parsed:
+        if parsed and "route" in parsed and isinstance(parsed["route"], dict):
             logger.info(
-                "AI narrative OK: model=%s, score=%s, selected_route=%s",
-                model, parsed.get('score', '?'), parsed.get('selected_route', '?'),
+                "AI route design OK: model=%s, score=%s",
+                model, parsed["route"].get("score", "?"),
             )
             parsed["ai_model"] = model
             parsed["ai_stats"] = ai_stats
             return parsed
-        logger.error("AI returned text but JSON parse failed. Raw (first 500 chars): %.500s", raw_text)
+        logger.error("AI returned text but parse failed or no route. Raw (first 500 chars): %.500s", raw_text)
 
-    # Rule-based fallback
-    logger.warning("All AI providers failed — using rule-based scoring")
-    result = _rule_based_fallback(candidates, task_inputs)
-    result["ai_stats"] = ai_stats
-    return result
-
-
-def _rule_based_fallback(candidates: list[dict], task_inputs: dict) -> dict:
-    """Simple rule-based scoring when AI is unavailable."""
-    if not candidates:
-        return {
-            "selected_route": 0,
-            "score": 0,
-            "explanation": "No candidate routes could be generated.",
-            "ai_model": "rule_based",
-        }
-
-    best = candidates[0]
+    # Fallback — no route available without AI
+    logger.warning("All AI providers failed — cannot generate route")
     return {
-        "selected_route": 1,
-        "score": int(best.get("score", 50)),
-        "explanation": (
-            f"Route selected based on numeric scoring. "
-            f"Total distance: {best.get('total_distance_km', 0):.1f}km. "
-            f"AI narrative unavailable — review weather conditions manually."
-        ),
-        "weather_summary": "AI weather summary unavailable.",
-        "ai_model": "rule_based",
+        "route": None,
+        "explanation": "",
+        "weather_summary": "AI unavailable — cannot generate route proposal.",
+        "safety_notes": ["AI route generation failed. Please try again or check your API key."],
+        "ai_model": "none",
+        "ai_stats": ai_stats,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Route validation helpers
+# ---------------------------------------------------------------------------
+
+def validate_ai_route(
+    route: dict,
+    takeoff_lat: float,
+    takeoff_lon: float,
+    available_waypoints: list[dict],
+    max_waypoint_snap_km: float = 5.0,
+) -> dict | None:
+    """Validate and snap an AI-proposed route to real waypoint coordinates.
+
+    Returns a validated route dict or None if invalid.
+    Snaps each proposed turnpoint to the closest available waypoint within
+    max_waypoint_snap_km to handle minor coordinate imprecision from the LLM.
+    """
+    turnpoints = route.get("turnpoints", [])
+    if not turnpoints:
+        logger.warning("AI route has no turnpoints: %s", route.get("description", "?"))
+        return None
+
+    from backend.task_planner.waypoints import _haversine, _bearing
+
+    snapped_tps: list[dict] = []
+    for tp in turnpoints:
+        tp_lat = tp.get("lat", 0)
+        tp_lon = tp.get("lon", 0)
+        tp_name = tp.get("name", "?")
+
+        # Find closest available waypoint
+        best_wp = None
+        best_dist = float("inf")
+        for wp in available_waypoints:
+            d = _haversine(tp_lat, tp_lon, wp["lat"], wp["lon"])
+            if d < best_dist:
+                best_dist = d
+                best_wp = wp
+
+        if best_wp and best_dist <= max_waypoint_snap_km:
+            snapped_tps.append({
+                "name": best_wp["name"],
+                "lat": best_wp["lat"],
+                "lon": best_wp["lon"],
+                "type": best_wp.get("type", "town"),
+                "icao": best_wp.get("icao"),
+            })
+            if best_dist > 0.5:
+                logger.info("Snapped AI turnpoint '%s' → '%s' (%.1fkm offset)",
+                            tp_name, best_wp["name"], best_dist)
+        else:
+            logger.warning(
+                "AI turnpoint '%s' (%.4f, %.4f) not near any available waypoint "
+                "(closest: %.1fkm > %.1fkm limit)",
+                tp_name, tp_lat, tp_lon, best_dist, max_waypoint_snap_km,
+            )
+            return None
+
+    # Build legs: takeoff → TP1 → TP2 → ... → takeoff
+    legs = []
+    points = [(takeoff_lat, takeoff_lon)] + [(tp["lat"], tp["lon"]) for tp in snapped_tps] + [(takeoff_lat, takeoff_lon)]
+    names = ["Takeoff"] + [tp["name"] for tp in snapped_tps] + ["Takeoff"]
+
+    total_distance = 0.0
+    for i in range(len(points) - 1):
+        dist = _haversine(points[i][0], points[i][1], points[i + 1][0], points[i + 1][1])
+        brg = _bearing(points[i][0], points[i][1], points[i + 1][0], points[i + 1][1])
+        total_distance += dist
+        legs.append({
+            "from": names[i],
+            "to": names[i + 1],
+            "from_lat": points[i][0],
+            "from_lon": points[i][1],
+            "to_lat": points[i + 1][0],
+            "to_lon": points[i + 1][1],
+            "distance_km": round(dist, 1),
+            "bearing": round(brg, 0),
+        })
+
+    return {
+        "description": route.get("description", "AI-proposed route"),
+        "score": route.get("score", 50),
+        "explanation": route.get("explanation", ""),
+        "total_distance_km": round(total_distance, 1),
+        "turnpoints": [{"lat": tp["lat"], "lon": tp["lon"]} for tp in snapped_tps],
+        "turnpoint_names": [tp["name"] for tp in snapped_tps],
+        "legs": legs,
     }
 
 

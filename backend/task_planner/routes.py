@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 
 from backend.db import get_db
 from backend.services.usage_service import log_request as _log_request
-from backend.task_planner.ai_service import generate_task_narrative
+from backend.task_planner.ai_service import generate_task_routes, validate_ai_route
 from backend.task_planner.airspace import (
     check_task_airspace,
     compute_airspace_score,
@@ -38,8 +38,8 @@ from backend.task_planner.airspace import (
 from backend.task_planner.optimizer import (
     estimate_flight_time,
     geocode_place,
-    optimize_task,
 )
+from backend.task_planner.waypoints import discover_waypoints
 from backend.task_planner.terrain import check_task_terrain
 from backend.task_planner.weather import fetch_weather_grid
 from backend.utils.auth_decorators import login_required
@@ -536,7 +536,7 @@ def generate_task():
         "safety_profile": safety_profile,
         "soaring_mode": soaring_mode,
         "constraints": constraints,
-        "custom_instructions": (data.get("custom_instructions") or "")[:500],
+        "custom_instructions": (data.get("custom_instructions") or "")[:2000],
     }
 
     # User's preferred UI language (en, pl, de, cs)
@@ -657,79 +657,64 @@ def generate_task():
                 "has_blocking": airspace_result.has_blocking_conflict,
             }
 
-        # Per-candidate airspace checker — reuses pre-fetched zones (no extra API calls)
-        def _check_route_airspace(points):
-            """Check airspace for a candidate route's actual turnpoints."""
-            try:
-                result = check_task_airspace(
-                    db, list(points), flight_date, safety_profile, constraints,
-                    prefetched_zones=(pre_zones, pre_notams),
-                )
-                return {
-                    "conflicts": [{"zone_name": c.zone_name} for c in result.conflicts],
-                    "has_blocking_conflict": result.has_blocking_conflict,
-                }
-            except Exception:
-                logger.debug("Per-candidate airspace check error", exc_info=True)
-                return None
-
-        # ── 3. Optimize routes ────────────────────────────────────────────
-        # Extract timed weather cells for time-aware scoring
-        timed_cells = weather_meta.get("timed_cells")
-
-        # Parse takeoff time for time-aware weather matching
-        takeoff_time_str = data.get("takeoff_time")
-        takeoff_hour = 11.0  # default
-        if takeoff_time_str:
-            try:
-                takeoff_hour = float(takeoff_time_str.split(":")[0])
-            except (ValueError, IndexError):
-                pass
-
-        max_duration = float(data.get("max_duration_hours", 4.0))
-
-        # ── 3a. Parse preferred waypoints and TP count from custom instructions
-        preferred_waypoints: list[tuple[float, float]] = []
-        requested_tp_count: int | None = None
-        custom_instr = inputs_snapshot.get("custom_instructions", "")
-        if custom_instr:
-            preferred_waypoints = _parse_waypoints_from_instructions(
-                custom_instr, takeoff["lat"], takeoff["lon"], target_km,
-            )
-            requested_tp_count = _parse_turnpoint_count(custom_instr)
-
-        top_candidates = optimize_task(
+        # ── 3. Discover waypoints for AI ─────────────────────────────────
+        waypoints = discover_waypoints(
+            db,
             takeoff["lat"], takeoff["lon"],
             target_km,
             weather_cells,
-            dest_lat=dest["lat"] if dest and dest != takeoff else None,
-            dest_lon=dest["lon"] if dest and dest != takeoff else None,
-            soaring_mode=soaring_mode,
             safety_profile=safety_profile,
-            airspace_checker=_check_route_airspace,
-            timed_cells=timed_cells,
-            takeoff_hour=takeoff_hour,
-            max_duration_hours=max_duration,
-            preferred_waypoints=preferred_waypoints or None,
-            requested_tp_count=requested_tp_count,
         )
-        g._aip_external_calls["candidates"] = len(top_candidates)
+        g._aip_external_calls["waypoints"] = len(waypoints)
 
-        if not top_candidates:
+        if not waypoints:
             _update_session(db, session_id, "error",
-                            error_message="Could not generate any viable routes.")
+                            error_message="No waypoints found in the task area.")
             return jsonify({
                 "status": "error",
-                "message": "Could not generate any viable routes.",
+                "message": "No waypoints found in the task area.",
                 "session_id": session_id,
             }), 200
 
-        # ── 4. Terrain check on top candidate ─────────────────────────────
+        # Build weather summary with time-windowed cells for richer LLM context
+        timed_cells = weather_meta.get("timed_cells")
+        weather_summary = [c.summary_line() for c in weather_cells]
+        if timed_cells:
+            for tw_name in ("morning", "midday", "afternoon"):
+                for c in timed_cells.get(tw_name, []):
+                    weather_summary.append(c.summary_line())
+
+        # Format waypoints for the AI prompt
+        waypoint_dicts = []
+        for wp in waypoints:
+            waypoint_dicts.append({
+                "name": wp.name,
+                "lat": wp.lat,
+                "lon": wp.lon,
+                "type": wp.type,
+                "distance_km": wp.distance_km,
+                "bearing_deg": wp.bearing_deg,
+                "icao": wp.icao,
+                "summary_line": wp.summary_line(),
+            })
+
+        # Format airspace zones for the AI prompt
+        airspace_zone_dicts = []
+        for zone in pre_zones:
+            airspace_zone_dicts.append({
+                "name": zone.name,
+                "type": zone.type,
+                "airspace_class": zone.airspace_class,
+                "lower_limit_ft": zone.lower_limit_ft,
+                "upper_limit_ft": zone.upper_limit_ft,
+                "polygon": zone.polygon,
+            })
+
+        # ── 4. Terrain check (use takeoff area as initial estimate) ───────
         terrain_info = None
         try:
-            best = top_candidates[0]
             terrain_result = check_task_terrain(
-                best.turnpoints,
+                [(takeoff["lat"], takeoff["lon"])],
                 expected_altitude_m=int((weather_cells[0].bl_height or 1500) * 0.8),
             )
             terrain_info = {
@@ -739,19 +724,10 @@ def generate_task():
         except Exception:
             logger.warning("Terrain check failed", exc_info=True)
 
-        # ── 5. AI narrative ───────────────────────────────────────────────
-        # Build weather summary with time-windowed cells for richer LLM context
-        weather_summary = [c.summary_line() for c in weather_cells[:20]]
-        if timed_cells:
-            for tw_name in ("morning", "midday", "afternoon"):
-                tw_list = timed_cells.get(tw_name, [])
-                for c in tw_list[:7]:
-                    weather_summary.append(c.summary_line())
-        candidate_dicts = [c.to_dict() for c in top_candidates]
-
-        ai_result = generate_task_narrative(
-            candidate_dicts, weather_summary, inputs_snapshot,
-            airspace_info=airspace_info,
+        # ── 5. AI route design ────────────────────────────────────────────
+        ai_result = generate_task_routes(
+            waypoint_dicts, weather_summary, inputs_snapshot,
+            airspace_zones=airspace_zone_dicts,
             terrain_info=terrain_info,
             language=language,
             api_key_override=user_api_key,
@@ -769,21 +745,43 @@ def generate_task():
                 "total_time_ms": attempt.get("time_ms", 0),
             }
 
-        # ── 6. Build response ─────────────────────────────────────────────
-        selected_idx = ai_result.get("selected_route", 1) - 1
-        selected_idx = max(0, min(selected_idx, len(top_candidates) - 1))
-        selected = top_candidates[selected_idx]
+        ai_route = ai_result.get("route")
+        if not ai_route:
+            _update_session(db, session_id, "error",
+                            error_message="AI could not generate a viable route.")
+            return jsonify({
+                "status": "error",
+                "message": "AI could not generate a viable route.",
+                "session_id": session_id,
+            }), 200
 
+        # ── 6. Validate & snap AI route to real waypoints ─────────────────
+        validated = validate_ai_route(
+            ai_route,
+            takeoff["lat"], takeoff["lon"],
+            waypoint_dicts,
+        )
+        if not validated:
+            logger.warning("AI route validation failed — turnpoints don't match available waypoints")
+            _update_session(db, session_id, "error",
+                            error_message="AI route could not be validated against available waypoints.")
+            return jsonify({
+                "status": "error",
+                "message": "AI route could not be validated. Please try again.",
+                "session_id": session_id,
+            }), 200
+
+        # ── 7. Build response ─────────────────────────────────────────────
         # Flight time estimate
         flight_est = estimate_flight_time(
-            selected.total_distance_km,
+            validated["total_distance_km"],
             glider_polar=glider,
         )
 
         result = {
             "status": "completed",
-            "task": selected.to_dict(),
-            "score": ai_result.get("score", int(selected.score)),
+            "task": validated,
+            "score": ai_result.get("route", {}).get("score", 50),
             "explanation": ai_result.get("explanation", ""),
             "weather_summary": ai_result.get("weather_summary", ""),
             "recommended_takeoff_time": ai_result.get("recommended_takeoff_time"),
@@ -797,7 +795,7 @@ def generate_task():
             ),
             "safety_notes": ai_result.get("safety_notes", []),
             "ai_model": ai_result.get("ai_model", "none"),
-            "alternatives": [c.to_dict() for c in top_candidates[1:4]],
+            "alternatives": [],
             "weather_meta": {k: v for k, v in weather_meta.items() if k != "timed_cells"},
             "terrain": terrain_info,
             "airspace": airspace_info,
@@ -827,105 +825,6 @@ def generate_task():
 
 
 # ── Helper functions ─────────────────────────────────────────────────────────
-
-def _parse_turnpoint_count(instructions: str) -> int | None:
-    """Extract a requested turnpoint count from custom instructions.
-
-    Supports patterns like '4 turnpoints', '3 TP', 'trzy punkty zwrotne', etc.
-    Returns None if no count is found.
-    """
-    import re as _re
-
-    # Digit-based patterns (EN, PL, DE, CS)
-    digit_match = _re.search(
-        r'(\d+)\s*(?:turn\s*points?|TPs?|punkty?\s*zwrotn[ey]|Wendepunkt[en]*|otočn[éý]ch?\s*bod[ůu]?)',
-        instructions,
-        _re.IGNORECASE,
-    )
-    if digit_match:
-        n = int(digit_match.group(1))
-        if 1 <= n <= 10:
-            return n
-
-    # Word-based numbers (EN + PL)
-    _word_numbers = {
-        'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6,
-        'jeden': 1, 'dwa': 2, 'trzy': 3, 'cztery': 4, 'pięć': 5, 'sześć': 6,
-        'zwei': 2, 'drei': 3, 'vier': 4, 'fünf': 5, 'sechs': 6,
-        'dva': 2, 'tři': 3, 'čtyři': 4, 'pět': 5, 'šest': 6,
-    }
-    for word, num in _word_numbers.items():
-        if _re.search(
-            rf'\b{_re.escape(word)}\b\s*(?:turn\s*points?|TPs?|punkty?\s*zwrotn[ey]|Wendepunkt[en]*|otočn[éý]ch?\s*bod[ůu]?)',
-            instructions,
-            _re.IGNORECASE,
-        ):
-            return num
-
-    return None
-
-
-def _parse_waypoints_from_instructions(
-    instructions: str,
-    bias_lat: float,
-    bias_lon: float,
-    radius_km: float,
-) -> list[tuple[float, float]]:
-    """Extract place names from custom instructions and geocode them.
-
-    Uses simple heuristic: look for capitalized words/phrases that might be
-    place names (after common prepositions like 'through', 'via', 'over',
-    'near', 'around', 'przez', 'przez', 'koło', 'nad', 'über', 'přes').
-    Then geocode each candidate with Nominatim biased to the task area.
-    """
-    import re as _re
-
-    # Patterns to extract place names after directional prepositions
-    # Supports EN, PL, DE, CS
-    prep_pattern = _re.compile(
-        r'(?:through|via|over|near|around|towards?|past|include|'
-        r'przez|koło|nad|obok|w kierunku|blisko|'
-        r'über|bei|nahe|Richtung|vorbei|'
-        r'přes|kolem|poblíž|směrem)\s+'
-        r'([A-ZŻŹĆĄŚĘŁÓŃÁÉÍÓÚŮÝČĎĚŇŘŠŤŽ][a-zżźćąśęłóńáéíóúůýčďěňřšťž]+(?:\s+[A-ZŻŹĆĄŚĘŁÓŃÁÉÍÓÚŮÝČĎĚŇŘŠŤŽ][a-zżźćąśęłóńáéíóúůýčďěňřšťž]+)*)',
-        _re.UNICODE,
-    )
-
-    candidates = prep_pattern.findall(instructions)
-
-    # Also check for standalone capitalized words that are 4+ chars and not common words
-    _common = {
-        'Avoid', 'Prefer', 'Include', 'Make', 'Route', 'Flight', 'Task',
-        'Thermal', 'Ridge', 'Wave', 'Landing', 'Takeoff', 'Airport',
-        'Unikaj', 'Preferuj', 'Trasa', 'Lot', 'Lotnisko',
-        'Vermeiden', 'Flug', 'Flugplatz', 'Strecke',
-        'Vyhněte', 'Přistání', 'Letiště',
-    }
-
-    if not candidates:
-        # Fallback: try all capitalized multi-word phrases
-        fallback = _re.findall(
-            r'\b([A-ZŻŹĆĄŚĘŁÓŃÁÉÍÓÚŮÝČĎĚŇŘŠŤŽ][a-zżźćąśęłóńáéíóúůýčďěňřšťž]{3,}(?:\s+[A-ZŻŹĆĄŚĘŁÓŃÁÉÍÓÚŮÝČĎĚŇŘŠŤŽ][a-zżźćąśęłóńáéíóúůýčďěňřšťž]+)*)\b',
-            instructions,
-            _re.UNICODE,
-        )
-        candidates = [w for w in fallback if w not in _common]
-
-    logger.info("Parsed %d place-name candidates from custom instructions: %s",
-                len(candidates), candidates)
-
-    waypoints: list[tuple[float, float]] = []
-    seen: set[str] = set()
-    for name in candidates[:5]:  # limit to avoid excessive API calls
-        if name.lower() in seen:
-            continue
-        seen.add(name.lower())
-        coords = geocode_place(name, bias_lat, bias_lon, radius_km=max(radius_km, 200))
-        if coords:
-            waypoints.append(coords)
-
-    return waypoints
-
 
 def _resolve_airport(db: Session, identifier: str) -> dict | None:
     """Resolve an airport by ID, ICAO code, or name."""
