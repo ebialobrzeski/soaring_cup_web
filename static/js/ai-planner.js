@@ -551,6 +551,7 @@ class AiPlanner {
             glider_id: val('aip-glider-id') || null,
             safety_profile: document.getElementById('aip-safety')?.value || 'standard',
             soaring_mode: document.getElementById('aip-soaring-mode')?.value || 'thermal',
+            language: window.i18n?.currentLang || 'en',
             constraints: {
                 exclude_transponder: checked('aip-exclude-transponder'),
                 exclude_flight_plan: checked('aip-exclude-flightplan'),
@@ -775,17 +776,19 @@ class AiPlanner {
         if (narrativeEl) {
             let html = '';
             // Weather summary
-            if (proposal.weather_summary_en) {
+            const weatherText = proposal.weather_summary || proposal.weather_summary_en;
+            if (weatherText) {
                 html += `<div class="aip-narrative-box aip-weather-summary">
                     <i class="fas fa-cloud-sun"></i>
-                    <div>${this._renderMarkdown(proposal.weather_summary_en)}</div>
+                    <div>${this._renderMarkdown(weatherText)}</div>
                 </div>`;
             }
             // Explanation
-            if (proposal.explanation_en) {
+            const explanationText = proposal.explanation || proposal.explanation_en;
+            if (explanationText) {
                 html += `<div class="aip-narrative-box">
                     <i class="fas fa-robot"></i>
-                    <div>${this._renderMarkdown(proposal.explanation_en)}</div>
+                    <div>${this._renderMarkdown(explanationText)}</div>
                 </div>`;
             }
             // Safety notes

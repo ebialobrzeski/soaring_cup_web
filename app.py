@@ -152,6 +152,29 @@ def get_session_waypoints():
     return []
 
 
+def resolve_task_waypoints(task_points):
+    """Resolve waypoints for task points.
+
+    Tries session waypoints first by index; falls back to inline waypoint data
+    sent by the frontend. Returns a list of Waypoint objects or raises ValueError.
+    """
+    session_wps = get_session_waypoints()
+    result = []
+    for tp in task_points:
+        idx = tp.get('waypointIndex')
+        # Try session lookup by index
+        if idx is not None and 0 <= idx < len(session_wps):
+            result.append(session_wps[idx])
+            continue
+        # Fall back to inline waypoint data
+        inline = tp.get('waypoint')
+        if inline and isinstance(inline, dict) and inline.get('latitude') and inline.get('longitude'):
+            result.append(Waypoint.from_dict(inline))
+            continue
+        raise ValueError(f'Invalid waypoint index: {idx}')
+    return result
+
+
 def set_session_waypoints(waypoints):
     """Store waypoints in session storage (preserves task data)."""
     try:
@@ -370,15 +393,7 @@ def export_task():
         if len(task_points) < 2:
             return jsonify({'success': False, 'error': 'A task needs at least 2 points (start + finish)'}), 400
 
-        waypoints = get_session_waypoints()
-
-        # Collect the waypoints used in the task
-        task_waypoints = []
-        for tp in task_points:
-            idx = tp.get('waypointIndex')
-            if idx is None or idx < 0 or idx >= len(waypoints):
-                return jsonify({'success': False, 'error': f'Invalid waypoint index: {idx}'}), 400
-            task_waypoints.append(waypoints[idx])
+        task_waypoints = resolve_task_waypoints(task_points)
 
         # Build obs zones from the request
         obs_zones = [tp.get('obsZone', {}) for tp in task_points]
@@ -386,6 +401,8 @@ def export_task():
         content = write_task_cup(task_name, task_waypoints, obs_zones, task_options)
 
         return jsonify({'success': True, 'content': content})
+    except ValueError as ve:
+        return jsonify({'success': False, 'error': str(ve)}), 400
     except Exception as e:
         import traceback
         app.logger.error(f"Task export error: {e}")
@@ -406,14 +423,7 @@ def download_task():
         if len(task_points) < 2:
             return jsonify({'success': False, 'error': 'A task needs at least 2 points'}), 400
 
-        waypoints = get_session_waypoints()
-
-        task_waypoints = []
-        for tp in task_points:
-            idx = tp.get('waypointIndex')
-            if idx is None or idx < 0 or idx >= len(waypoints):
-                return jsonify({'success': False, 'error': f'Invalid waypoint index: {idx}'}), 400
-            task_waypoints.append(waypoints[idx])
+        task_waypoints = resolve_task_waypoints(task_points)
 
         obs_zones = [tp.get('obsZone', {}) for tp in task_points]
 
@@ -462,14 +472,7 @@ def task_qr():
         if len(task_points) < 2:
             return jsonify({'success': False, 'error': 'A task needs at least 2 points'}), 400
 
-        waypoints = get_session_waypoints()
-
-        task_waypoints = []
-        for tp in task_points:
-            idx = tp.get('waypointIndex')
-            if idx is None or idx < 0 or idx >= len(waypoints):
-                return jsonify({'success': False, 'error': f'Invalid waypoint index: {idx}'}), 400
-            task_waypoints.append(waypoints[idx])
+        task_waypoints = resolve_task_waypoints(task_points)
 
         obs_zones = [tp.get('obsZone', {}) for tp in task_points]
         content = write_task_cup(task_name, task_waypoints, obs_zones, task_options)
@@ -524,13 +527,17 @@ def _xctsk_encode_z(lon, lat, alt, radius):
             _polyline_encode_num(round(radius)))
 
 
-def build_xctsk_payload(task_points, waypoints, no_start='', goal_is_line=False):
-    """Build XCTSK v2 JSON payload from task data."""
+def build_xctsk_payload(task_points, resolved_waypoints, no_start='', goal_is_line=False):
+    """Build XCTSK v2 JSON payload from task data.
+
+    Args:
+        task_points: list of task point dicts (for obsZone extraction)
+        resolved_waypoints: list of Waypoint objects, one per task point
+    """
     n = len(task_points)
     turnpoints = []
     for i, tp in enumerate(task_points):
-        idx = tp.get('waypointIndex')
-        wp = waypoints[idx]
+        wp = resolved_waypoints[i]
         oz = tp.get('obsZone', {})
         radius = int(oz.get('r1') or oz.get('R1') or 500)
         alt = int(wp.elevation) if wp.elevation else 0
@@ -586,16 +593,12 @@ def task_xctsk_qr():
         if len(task_points) < 2:
             return jsonify({'success': False, 'error': 'A task needs at least 2 points'}), 400
 
-        waypoints = get_session_waypoints()
-        for tp in task_points:
-            idx = tp.get('waypointIndex')
-            if idx is None or idx < 0 or idx >= len(waypoints):
-                return jsonify({'success': False, 'error': f'Invalid waypoint index: {idx}'}), 400
+        resolved_wps = resolve_task_waypoints(task_points)
 
         last_oz = task_points[-1].get('obsZone', {})
         goal_is_line = last_oz.get('isLine') or int(last_oz.get('Line', 0) or 0) == 1
 
-        xctsk = build_xctsk_payload(task_points, waypoints, no_start, goal_is_line)
+        xctsk = build_xctsk_payload(task_points, resolved_wps, no_start, goal_is_line)
         xctsk_string = 'XCTSK:' + json.dumps(xctsk, ensure_ascii=False, separators=(',', ':'))
 
         # Generate QR code as PNG, return as base64 data URL
@@ -873,13 +876,7 @@ def create_share():
         if len(task_points) > TASK_MAX_POINTS:
             return jsonify({'success': False, 'error': f'Task exceeds maximum of {TASK_MAX_POINTS} points'}), 400
 
-        waypoints = get_session_waypoints()
-        task_waypoints = []
-        for tp in task_points:
-            idx = tp.get('waypointIndex')
-            if idx is None or idx < 0 or idx >= len(waypoints):
-                return jsonify({'success': False, 'error': f'Invalid waypoint index: {idx}'}), 400
-            task_waypoints.append(waypoints[idx].to_dict())
+        task_waypoints = [wp.to_dict() for wp in resolve_task_waypoints(task_points)]
 
         obs_zones = [tp.get('obsZone', {}) for tp in task_points]
         token = uuid.uuid4().hex[:16]

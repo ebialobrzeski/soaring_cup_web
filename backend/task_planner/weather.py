@@ -34,6 +34,14 @@ logger = logging.getLogger(__name__)
 # Data structures
 # ---------------------------------------------------------------------------
 
+# Time windows for weather bucketing (local solar time approximation)
+TIME_WINDOWS = {
+    "morning":   (9, 12),   # thermal development
+    "midday":    (12, 15),  # peak thermals
+    "afternoon": (15, 18),  # thermal decay
+}
+
+
 class WeatherCell:
     """A single grid-point forecast summary."""
 
@@ -42,7 +50,7 @@ class WeatherCell:
         "cloud_base_ft", "cloud_cover", "wind_speed_kts", "wind_dir",
         "wind_gusts_kts", "temperature", "dew_point", "precipitation",
         "visibility", "solar_radiation", "lapse_rate", "pressure",
-        "source", "raw",
+        "source", "raw", "time_window",
     )
 
     def __init__(self, **kwargs: Any):
@@ -54,7 +62,8 @@ class WeatherCell:
 
     def summary_line(self) -> str:
         """Compact one-line descriptor for the LLM."""
-        parts = [f"{self.lat:.1f}N {self.lon:.1f}E:"]
+        tw = f"[{self.time_window}] " if self.time_window else ""
+        parts = [f"{tw}{self.lat:.1f}N {self.lon:.1f}E:"]
         if self.bl_height is not None:
             parts.append(f"BL={self.bl_height}m")
         ti = self.thermal_index
@@ -375,12 +384,17 @@ def fetch_open_meteo(
     forecast_date: date,
     start_hour: int = 6,
     end_hour: int = 21,
-) -> tuple[list[WeatherCell], dict]:
+) -> tuple[list[WeatherCell], dict, dict[str, list[WeatherCell]]]:
     """Fetch general weather data from Open-Meteo for multiple grid points.
 
-    Returns (cells, stats) where stats tracks call counts and timing.
+    Returns (cells, stats, timed_cells) where:
+      cells      — averaged cells for the full soaring window (backward compat)
+      stats      — call counts and timing
+      timed_cells — dict keyed by time window name ('morning', 'midday', 'afternoon')
+                    each mapping to a list of WeatherCell for that window
     """
     cells: list[WeatherCell] = []
+    timed_cells: dict[str, list[WeatherCell]] = {tw: [] for tw in TIME_WINDOWS}
     date_str = forecast_date.isoformat()
     stats = {"calls": 0, "ok": 0, "errors": 0, "total_time_ms": 0}
 
@@ -407,11 +421,20 @@ def fetch_open_meteo(
             hourly = data.get("hourly", {})
             times = hourly.get("time", [])
 
-            # Average over the thermal window
+            # Full-window average (backward compatible)
             cell = _aggregate_open_meteo_hourly(lat, lon, hourly, times, start_hour, end_hour)
             if cell:
                 cells.append(cell)
                 stats["ok"] += 1
+
+            # Time-bucketed cells from the same response
+            for tw_name, (tw_start, tw_end) in TIME_WINDOWS.items():
+                tw_cell = _aggregate_open_meteo_hourly(
+                    lat, lon, hourly, times, tw_start, tw_end,
+                    time_window=tw_name,
+                )
+                if tw_cell:
+                    timed_cells[tw_name].append(tw_cell)
 
         except Exception:
             elapsed = int((_time.perf_counter() - t0) * 1000)
@@ -419,8 +442,10 @@ def fetch_open_meteo(
             stats["errors"] += 1
             logger.warning("Open-Meteo fetch failed for (%.2f, %.2f)", lat, lon, exc_info=True)
 
-    logger.info("Open-Meteo: fetched %d/%d grid points (%dms)", len(cells), len(points), stats["total_time_ms"])
-    return cells, stats
+    logger.info("Open-Meteo: fetched %d/%d grid points (%dms), timed cells: %s",
+                len(cells), len(points), stats["total_time_ms"],
+                {tw: len(v) for tw, v in timed_cells.items()})
+    return cells, stats, timed_cells
 
 
 def _aggregate_open_meteo_hourly(
@@ -430,8 +455,14 @@ def _aggregate_open_meteo_hourly(
     times: list[str],
     start_hour: int,
     end_hour: int,
+    time_window: Optional[str] = None,
 ) -> Optional[WeatherCell]:
-    """Average Open-Meteo hourly data over the soaring window."""
+    """Average Open-Meteo hourly data over a time range.
+
+    Args:
+        time_window: optional label (e.g. 'morning', 'midday', 'afternoon')
+                     stored on the returned cell for temporal scoring.
+    """
     if not times:
         return None
 
@@ -507,6 +538,7 @@ def _aggregate_open_meteo_hourly(
         pressure=round(pressure, 1) if pressure is not None else None,
         source="open-meteo",
         raw=None,
+        time_window=time_window,
     )
 
 
@@ -882,7 +914,7 @@ def fetch_weather_grid(
     logger.info("Cache: %d hits, %d to fetch", len(cached), len(uncached))
 
     # 3. Open-Meteo bulk fetch for uncached
-    fresh_cells, om_stats = fetch_open_meteo(uncached, forecast_date, start_hour, end_hour)
+    fresh_cells, om_stats, timed_cells = fetch_open_meteo(uncached, forecast_date, start_hour, end_hour)
 
     # Store fresh cells in cache
     if fresh_cells:
@@ -896,6 +928,13 @@ def fetch_weather_grid(
     for p, data in cached.items():
         all_cells.append(WeatherCell(**data))
     all_cells.extend(fresh_cells)
+
+    # Also add cached cells into timed buckets (they have no time_window, use as midday proxy)
+    for p, data in cached.items():
+        for tw_name in TIME_WINDOWS:
+            c = WeatherCell(**data)
+            c.time_window = tw_name
+            timed_cells.setdefault(tw_name, []).append(c)
 
     # 4. Coarse filter
     passing, failed = filter_cells(all_cells, forecast_date=forecast_date)
@@ -914,6 +953,9 @@ def fetch_weather_grid(
             surviving_points = surviving_points[::step][:20]
         windy_data, windy_stats = fetch_windy_soaring(surviving_points, forecast_date)
         enrich_cells_with_windy(passing, windy_data)
+        # Also enrich timed cells with Windy data
+        for tw_name in TIME_WINDOWS:
+            enrich_cells_with_windy(timed_cells.get(tw_name, []), windy_data)
 
     # 6. IMGW supplement for Polish tasks
     imgw, imgw_stats = fetch_imgw_supplement(takeoff_lat, takeoff_lon)
@@ -925,6 +967,7 @@ def fetch_weather_grid(
         "passing": len(passing),
         "failed": len(failed),
         "imgw_station": imgw,
+        "timed_cells": timed_cells,
         "api_stats": {
             "open_meteo": om_stats,
             "windy": windy_stats,

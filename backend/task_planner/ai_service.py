@@ -74,10 +74,13 @@ def safe_json_parse(text: str) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 
 # Models tried in order; OpenRouter handles provider failover within each model.
+# Gemini 2.5 Flash: excellent structured JSON output and reasoning at low cost
+# Llama 3.3 70B: strong fallback with good instruction following
+# DeepSeek-V3: capable and cost-effective last resort
 _OPENROUTER_MODELS = [
-    "google/gemini-2.0-flash-001",
+    "google/gemini-2.5-flash",
     "meta-llama/llama-3.3-70b-instruct",
-    "deepseek/deepseek-chat",
+    "deepseek/deepseek-chat-v3-0324",
 ]
 
 _OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -278,6 +281,50 @@ def _call_deepseek_direct(prompt: str, system: str = "") -> str:
 _SYSTEM_PROMPT = """You are an expert gliding meteorologist and cross-country flight planner \
 with 20+ years soaring experience in Central Europe (Poland).
 
+ROLE: Analyze weather data and candidate routes to select the best route \
+and write an actionable pilot briefing. You receive routes PRE-SCORED by \
+an optimizer. Your job is primarily to provide NARRATIVE and WEATHER ANALYSIS, \
+not to second-guess the optimizer's scoring. Only override the top-scored route \
+if you identify a specific meteorological danger the optimizer missed.
+
+TEMPORAL AWARENESS: Weather data is labeled by time window:
+- [morning] = 09:00-12:00 — thermal development, cumulus forming
+- [midday] = 12:00-15:00 — peak thermal strength
+- [afternoon] = 15:00-18:00 — thermal decay, overdevelopment risk
+Your narrative MUST describe how conditions evolve through the day and \
+advise the pilot accordingly (e.g., "complete the furthest leg by 14:00 \
+before afternoon overdevelopment").
+
+AIRSPACE SAFETY (CRITICAL):
+- NEVER select a route that enters RESTRICTED (EPTR*), PROHIBITED (EPPR*), \
+  or DANGER (EPDA*) airspace zones. If any candidate leg has airspace conflicts \
+  marked with suggestion "avoid", that route MUST NOT be selected.
+- If ALL candidate routes have blocking airspace conflicts, say so explicitly \
+  and recommend the pilot consult with ATC or choose a different area.
+- Check the per-leg airspace_conflicts count — even 1 "avoid" conflict disqualifies \
+  the route for conservative and standard safety profiles.
+
+ROUTE TYPE GUIDANCE:
+- For conservative/standard safety: STRONGLY prefer triangle routes. \
+  Triangle routes keep the pilot within glide range of the takeoff airport. \
+  Out-and-return routes leave the pilot far from base on a single leg. \
+  Only recommend O&R if no viable triangle exists.
+- For aggressive safety: pilot accepts more risk, O&R is acceptable.
+- Legs should NOT all be the same length. Prefer asymmetric triangles: \
+  short first leg into the wind, long second leg with tailwind, medium return. \
+  This keeps the pilot close to home during the hardest (upwind) portion.
+
+TURNPOINT NAMING: Turnpoints are labeled with the nearest town or city name. \
+Always refer to turnpoints by their town name in the narrative (e.g., "Leg 1: \
+Takeoff → Rawicz" not "Leg 1: Takeoff → TP1"). Larger towns and cities are \
+preferred because they are easy to spot from the air. When describing legs, \
+mention recognisable landmarks (rivers, lakes, motorways, large forests) that \
+help the pilot confirm they are on track.
+
+RESPONSE LANGUAGE: Write ALL narrative text (explanation, weather_summary, \
+safety_notes) in the language specified by the RESPONSE LANGUAGE field. \
+Return only ONE version — do not duplicate in multiple languages.
+
 SCORING CRITERIA (total 100 pts):
 - Thermal Strength: 40 pts
 - Cloud Base: 30 pts
@@ -347,55 +394,94 @@ else:
 logger.debug("Final system prompt:\n%s", _SYSTEM_PROMPT)
 
 
+# Language code → full name for the LLM instruction
+_LANG_NAMES = {"en": "English", "pl": "Polish", "de": "German", "cs": "Czech"}
+
+
 def _build_task_prompt(
     candidates: list[dict],
     weather_summary: list[str],
     task_inputs: dict,
     airspace_info: Optional[dict] = None,
     terrain_info: Optional[dict] = None,
+    language: str = "en",
 ) -> str:
     """Build the prompt for final task selection and narrative."""
+    safety = task_inputs.get('safety_profile', 'standard')
+    lang_name = _LANG_NAMES.get(language, "English")
     lines = [
         f"TASK REQUEST: {task_inputs.get('target_distance_km', 100)}km "
         f"{task_inputs.get('soaring_mode', 'thermal')} flight from "
         f"{task_inputs.get('takeoff_airport', 'unknown')}",
         f"DATE: {task_inputs.get('flight_date', 'N/A')}",
-        f"SAFETY PROFILE: {task_inputs.get('safety_profile', 'standard')}",
-        "",
-        "WEATHER CONDITIONS (grid cell summaries):",
+        f"SAFETY PROFILE: {safety}",
+        f"RESPONSE LANGUAGE: {lang_name}",
     ]
-    for ws in weather_summary[:30]:  # limit to 30 cells
+
+    # Add safety profile guidance
+    if safety == "conservative":
+        lines.append("SAFETY GUIDANCE: Pilot wants MAXIMUM safety. Strongly prefer "
+                      "triangle/multi-leg routes that keep within glide range of takeoff. "
+                      "First leg MUST face into the wind so the return has tailwind. "
+                      "Do NOT select out-and-return routes unless all triangles are unflyable.")
+    elif safety == "standard":
+        lines.append("SAFETY GUIDANCE: Balanced safety. Prefer triangle routes over "
+                      "out-and-return. Starting into wind is recommended but not mandatory.")
+
+    # Weather summary with time-window labels
+    lines.append("")
+    lines.append("WEATHER CONDITIONS (grid cell summaries, time-bucketed where available):")
+    for ws in weather_summary[:40]:
         lines.append(f"  {ws}")
 
+    # Detailed airspace context per-candidate
     if airspace_info:
         lines.append("")
-        lines.append(f"AIRSPACE: {airspace_info.get('zones_count', 0)} zones, "
-                      f"{airspace_info.get('conflicts', 0)} conflicts")
+        lines.append(f"AIRSPACE OVERVIEW: {airspace_info.get('zones_count', 0)} zones in area, "
+                      f"{airspace_info.get('conflicts', 0)} conflicts detected")
+        if airspace_info.get('has_blocking'):
+            lines.append("  ⚠ BLOCKING CONFLICTS DETECTED — some routes cross restricted airspace")
 
     if terrain_info:
         lines.append(f"TERRAIN: max elevation {terrain_info.get('max_terrain_m', 0)}m ASL")
 
     lines.append("")
-    lines.append(f"TOP {len(candidates)} CANDIDATE ROUTES:")
+    lines.append(f"TOP {len(candidates)} CANDIDATE ROUTES (pre-scored by optimizer):")
     for i, c in enumerate(candidates, 1):
         lines.append(f"  Route {i}: {c.get('description', 'N/A')}")
         lines.append(f"    Distance: {c.get('total_distance_km', 0):.1f}km, "
-                      f"Score: {c.get('score', 0):.0f}/100")
+                      f"Optimizer Score: {c.get('score', 0):.0f}/100")
         legs = c.get("legs", [])
         for j, leg in enumerate(legs):
-            lines.append(f"    Leg {j+1}: {leg.get('from', '?')} → {leg.get('to', '?')} "
-                          f"({leg.get('distance_km', 0):.1f}km, {leg.get('bearing', 0):.0f}°)")
+            leg_info = (f"    Leg {j+1}: {leg.get('from', '?')} → {leg.get('to', '?')} "
+                        f"({leg.get('distance_km', 0):.1f}km, {leg.get('bearing', 0):.0f}°)")
+            # Include per-leg weather and wind data
+            if leg.get('thermal_quality') is not None:
+                leg_info += f" thermal={leg['thermal_quality']:.1f}"
+            if leg.get('wind_component_kts') is not None:
+                hw = leg['wind_component_kts']
+                label = "headwind" if hw > 0 else "tailwind"
+                leg_info += f" {label}={abs(hw):.0f}kt"
+            if leg.get('airspace_conflicts', 0) > 0:
+                leg_info += f" ⚠{leg['airspace_conflicts']} airspace conflicts"
+            lines.append(leg_info)
 
+    lines.append("")
+    lines.append("IMPORTANT: You MUST select the route with the highest optimizer score "
+                 "unless you have a specific meteorological reason to override it "
+                 "(e.g., weather deterioration along that route). "
+                 "If you override, explain why in the narrative.")
     lines.append("")
     lines.append("Analyze these routes. Return JSON with this structure:")
     lines.append('{')
     lines.append('  "selected_route": <1-based index of best route>,')
     lines.append('  "score": <0-100 integer>,')
-    lines.append('  "explanation_en": "<Detailed English narrative: weather analysis, '
-                 'route justification, safety notes, thermal strategy, estimated XC speed>",')
-    lines.append('  "explanation_pl": "<Same in Polish>",')
-    lines.append('  "weather_summary_en": "<Brief weather overview in English>",')
-    lines.append('  "weather_summary_pl": "<Brief weather overview in Polish>",')
+    lines.append(f'  "explanation": "<Detailed {lang_name} narrative: weather analysis by time '
+                 'window (morning/midday/afternoon conditions), route justification, '
+                 'safety notes, thermal strategy, wind strategy, estimated XC speed. '
+                 'Reference turnpoints by their town/landmark names.>",')
+    lines.append(f'  "weather_summary": "<Brief weather overview in {lang_name} including '
+                 'how conditions change through the day (morning→midday→afternoon)>",')
     lines.append('  "recommended_takeoff_time": "<HH:MM>",')
     lines.append('  "estimated_duration_hours": <float>,')
     lines.append('  "estimated_speed_kmh": <float>,')
@@ -411,6 +497,7 @@ def generate_task_narrative(
     task_inputs: dict,
     airspace_info: Optional[dict] = None,
     terrain_info: Optional[dict] = None,
+    language: str = "en",
 ) -> dict:
     """Send top candidates to LLM for final selection and narrative.
 
@@ -419,6 +506,7 @@ def generate_task_narrative(
     """
     prompt = _build_task_prompt(
         candidates, weather_summary, task_inputs, airspace_info, terrain_info,
+        language=language,
     )
     logger.info(
         "generate_task_narrative: %d candidates, %d weather cells, target=%skm, safety=%s",
@@ -455,8 +543,7 @@ def _rule_based_fallback(candidates: list[dict], task_inputs: dict) -> dict:
         return {
             "selected_route": 0,
             "score": 0,
-            "explanation_en": "No candidate routes could be generated.",
-            "explanation_pl": "Nie udało się wygenerować tras.",
+            "explanation": "No candidate routes could be generated.",
             "ai_model": "rule_based",
         }
 
@@ -464,18 +551,12 @@ def _rule_based_fallback(candidates: list[dict], task_inputs: dict) -> dict:
     return {
         "selected_route": 1,
         "score": int(best.get("score", 50)),
-        "explanation_en": (
+        "explanation": (
             f"Route selected based on numeric scoring. "
             f"Total distance: {best.get('total_distance_km', 0):.1f}km. "
             f"AI narrative unavailable — review weather conditions manually."
         ),
-        "explanation_pl": (
-            f"Trasa wybrana na podstawie punktacji numerycznej. "
-            f"Dystans: {best.get('total_distance_km', 0):.1f}km. "
-            f"Opis AI niedostępny — sprawdź warunki pogodowe ręcznie."
-        ),
-        "weather_summary_en": "AI weather summary unavailable.",
-        "weather_summary_pl": "Podsumowanie pogody AI niedostępne.",
+        "weather_summary": "AI weather summary unavailable.",
         "ai_model": "rule_based",
     }
 

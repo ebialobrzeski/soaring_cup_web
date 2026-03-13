@@ -1118,6 +1118,7 @@ class TaskPlanner {
             name: document.getElementById('task-name').value || 'Task',
             points: this.taskPoints.map(tp => ({
                 waypointIndex: tp.waypointIndex,
+                waypoint: tp.waypoint,
                 obsZone: tp.obsZone
             })),
             options: {
@@ -1293,6 +1294,7 @@ class TaskPlanner {
         const payload = {
             points: this.taskPoints.map(tp => ({
                 waypointIndex: tp.waypointIndex,
+                waypoint: tp.waypoint,
                 obsZone: tp.obsZone
             })),
             noStart: (document.getElementById('task-no-start').value || '') + ':00'

@@ -783,6 +783,7 @@ def check_task_airspace(
     flight_date: date,
     safety_profile: str = "standard",
     constraints: Optional[dict] = None,
+    prefetched_zones: Optional[tuple] = None,
 ) -> AirspaceCheckResult:
     """
     Full airspace check for a proposed task.
@@ -793,6 +794,10 @@ def check_task_airspace(
         flight_date: Planned flight date
         safety_profile: 'conservative' | 'standard' | 'aggressive'
         constraints: Airspace constraint toggles dict
+        prefetched_zones: Optional (zones, notams) tuple to skip API fetch.
+            When provided, zones/notams are used directly instead of calling
+            get_airspace_data.  This avoids redundant API calls when the
+            optimizer checks many candidate routes against the same area.
 
     Returns:
         AirspaceCheckResult with all conflicts and metadata.
@@ -808,7 +813,10 @@ def check_task_airspace(
         }
 
     buffer_km = SAFETY_BUFFERS_KM.get(safety_profile, 0.5)
-    zones, notams = get_airspace_data(db, task_points, flight_date)
+    if prefetched_zones is not None:
+        zones, notams = prefetched_zones
+    else:
+        zones, notams = get_airspace_data(db, task_points, flight_date)
 
     all_conflicts: list[AirspaceConflict] = []
     has_blocking = False

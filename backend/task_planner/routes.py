@@ -528,6 +528,11 @@ def generate_task():
         "constraints": constraints,
     }
 
+    # User's preferred UI language (en, pl, de, cs)
+    language = (data.get("language") or "en").strip().lower()
+    if language not in ("en", "pl", "de", "cs"):
+        language = "en"
+
     # Create session early so we can update it
     session_id = None
     auto_name = (
@@ -592,15 +597,43 @@ def generate_task():
                 "session_id": session_id,
             }), 200
 
+        # Log wind data availability for debugging
+        cells_with_wind = [c for c in weather_cells if c.wind_speed_kts is not None and c.wind_dir is not None]
+        if cells_with_wind:
+            avg_ws = sum(c.wind_speed_kts for c in cells_with_wind) / len(cells_with_wind)
+            avg_wd = sum(c.wind_dir for c in cells_with_wind) / len(cells_with_wind)
+            logger.info("Wind data: %d/%d cells have wind (avg %.0f° @ %.0fkt)",
+                        len(cells_with_wind), len(weather_cells), avg_wd, avg_ws)
+        else:
+            logger.warning("Wind data: NONE of %d weather cells have wind info", len(weather_cells))
+
         # ── 2. Airspace check ─────────────────────────────────────────────
+        # Pre-fetch airspace zones for the ENTIRE task area once.  The bbox
+        # covers takeoff + destination padded by target_km so every candidate
+        # route's legs fall inside the pre-fetched zone set.
+        from backend.task_planner.airspace import get_airspace_data
+
         task_center = [(takeoff["lat"], takeoff["lon"])]
         if dest and dest != takeoff:
             task_center.append((dest["lat"], dest["lon"]))
+
+        pre_zones: list = []
+        pre_notams: list = []
+        try:
+            pre_zones, pre_notams = get_airspace_data(
+                db, task_center, flight_date,
+                buffer_km=max(target_km * 0.8, 30),
+            )
+            logger.info("Pre-fetched %d airspace zones and %d NOTAMs for task area",
+                        len(pre_zones), len(pre_notams))
+        except Exception:
+            logger.warning("Wide-area airspace pre-fetch failed", exc_info=True)
 
         airspace_result = None
         try:
             airspace_result = check_task_airspace(
                 db, task_center, flight_date, safety_profile, constraints,
+                prefetched_zones=(pre_zones, pre_notams),
             )
         except Exception:
             logger.warning("Airspace check failed", exc_info=True)
@@ -613,12 +646,13 @@ def generate_task():
                 "has_blocking": airspace_result.has_blocking_conflict,
             }
 
-        # Per-candidate airspace checker — checks actual route legs
+        # Per-candidate airspace checker — reuses pre-fetched zones (no extra API calls)
         def _check_route_airspace(points):
             """Check airspace for a candidate route's actual turnpoints."""
             try:
                 result = check_task_airspace(
                     db, list(points), flight_date, safety_profile, constraints,
+                    prefetched_zones=(pre_zones, pre_notams),
                 )
                 return {
                     "conflicts": [{"zone_name": c.zone_name} for c in result.conflicts],
@@ -629,6 +663,20 @@ def generate_task():
                 return None
 
         # ── 3. Optimize routes ────────────────────────────────────────────
+        # Extract timed weather cells for time-aware scoring
+        timed_cells = weather_meta.get("timed_cells")
+
+        # Parse takeoff time for time-aware weather matching
+        takeoff_time_str = data.get("takeoff_time")
+        takeoff_hour = 11.0  # default
+        if takeoff_time_str:
+            try:
+                takeoff_hour = float(takeoff_time_str.split(":")[0])
+            except (ValueError, IndexError):
+                pass
+
+        max_duration = float(data.get("max_duration_hours", 4.0))
+
         top_candidates = optimize_task(
             takeoff["lat"], takeoff["lon"],
             target_km,
@@ -638,6 +686,9 @@ def generate_task():
             soaring_mode=soaring_mode,
             safety_profile=safety_profile,
             airspace_checker=_check_route_airspace,
+            timed_cells=timed_cells,
+            takeoff_hour=takeoff_hour,
+            max_duration_hours=max_duration,
         )
         g._aip_external_calls["candidates"] = len(top_candidates)
 
@@ -666,13 +717,20 @@ def generate_task():
             logger.warning("Terrain check failed", exc_info=True)
 
         # ── 5. AI narrative ───────────────────────────────────────────────
-        weather_summary = [c.summary_line() for c in weather_cells[:30]]
+        # Build weather summary with time-windowed cells for richer LLM context
+        weather_summary = [c.summary_line() for c in weather_cells[:20]]
+        if timed_cells:
+            for tw_name in ("morning", "midday", "afternoon"):
+                tw_list = timed_cells.get(tw_name, [])
+                for c in tw_list[:7]:
+                    weather_summary.append(c.summary_line())
         candidate_dicts = [c.to_dict() for c in top_candidates]
 
         ai_result = generate_task_narrative(
             candidate_dicts, weather_summary, inputs_snapshot,
             airspace_info=airspace_info,
             terrain_info=terrain_info,
+            language=language,
         )
         g._aip_external_calls["ai_model"] = ai_result.get("ai_model", "none")
         # Per-provider AI API stats
@@ -701,10 +759,8 @@ def generate_task():
             "status": "completed",
             "task": selected.to_dict(),
             "score": ai_result.get("score", int(selected.score)),
-            "explanation_en": ai_result.get("explanation_en", ""),
-            "explanation_pl": ai_result.get("explanation_pl", ""),
-            "weather_summary_en": ai_result.get("weather_summary_en", ""),
-            "weather_summary_pl": ai_result.get("weather_summary_pl", ""),
+            "explanation": ai_result.get("explanation", ""),
+            "weather_summary": ai_result.get("weather_summary", ""),
             "recommended_takeoff_time": ai_result.get("recommended_takeoff_time"),
             "estimated_duration_hours": (
                 ai_result.get("estimated_duration_hours")
@@ -717,15 +773,16 @@ def generate_task():
             "safety_notes": ai_result.get("safety_notes", []),
             "ai_model": ai_result.get("ai_model", "none"),
             "alternatives": [c.to_dict() for c in top_candidates[1:4]],
-            "weather_meta": weather_meta,
+            "weather_meta": {k: v for k, v in weather_meta.items() if k != "timed_cells"},
             "terrain": terrain_info,
             "airspace": airspace_info,
         }
 
         # Persist to session
+        serializable_meta = {k: v for k, v in weather_meta.items() if k != "timed_cells"}
         _update_session(
             db, session_id, "completed",
-            weather_data={"cells": len(weather_cells), "meta": weather_meta},
+            weather_data={"cells": len(weather_cells), "meta": serializable_meta},
             airspace_data=airspace_info,
             result=result,
         )

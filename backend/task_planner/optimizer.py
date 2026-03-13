@@ -20,7 +20,12 @@ import math
 from dataclasses import dataclass, field
 from typing import Optional
 
+import requests as _requests
+
 logger = logging.getLogger(__name__)
+
+# Overpass API for reverse-geocoding turnpoints to nearby towns
+_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +46,19 @@ class TaskLeg:
     wind_component_kts: Optional[float] = None  # positive = headwind
     terrain_clearance: Optional[dict] = None
     airspace_conflicts: int = 0
+
+
+def _format_wind_exposure(wind_component_kts: Optional[float]) -> Optional[str]:
+    """Format wind component as a human-readable string for the frontend."""
+    if wind_component_kts is None:
+        return None
+    hw = wind_component_kts
+    abs_hw = abs(hw)
+    if abs_hw < 1:
+        return "calm"
+    if hw > 0:
+        return f"↑ {abs_hw:.0f}kt HW"
+    return f"↓ {abs_hw:.0f}kt TW"
 
 
 @dataclass
@@ -69,6 +87,7 @@ class CandidateRoute:
                     "bearing": round(leg.bearing, 0),
                     "thermal_quality": leg.thermal_quality,
                     "wind_component_kts": leg.wind_component_kts,
+                    "wind_exposure": _format_wind_exposure(leg.wind_component_kts),
                     "airspace_conflicts": leg.airspace_conflicts,
                 }
                 for leg in self.legs
@@ -260,9 +279,9 @@ def generate_candidates(
 
     if same_airport:
         # Out-and-return + triangles
-        candidates.extend(_generate_out_and_return(takeoff_lat, takeoff_lon, target_km, 12))
-        candidates.extend(_generate_triangles(takeoff_lat, takeoff_lon, target_km, 12))
-        candidates.extend(_generate_fai_triangles(takeoff_lat, takeoff_lon, target_km, 8))
+        candidates.extend(_generate_out_and_return(takeoff_lat, takeoff_lon, target_km, 8))
+        candidates.extend(_generate_triangles(takeoff_lat, takeoff_lon, target_km, 6))
+        candidates.extend(_generate_fai_triangles(takeoff_lat, takeoff_lon, target_km, 4))
     else:
         # Sector routes between airports + some triangles from takeoff
         candidates.extend(
@@ -297,6 +316,70 @@ def _nearest_cell(lat: float, lon: float, cells: list) -> Optional[object]:
     return best
 
 
+def _estimate_time_window(
+    leg_index: int,
+    n_legs: int,
+    takeoff_hour: float = 11.0,
+    duration_hours: float = 4.0,
+) -> str:
+    """Estimate which time window a leg falls into based on flight progress."""
+    progress = leg_index / max(1, n_legs)
+    est_hour = takeoff_hour + progress * duration_hours
+    if est_hour < 12:
+        return "morning"
+    elif est_hour < 15:
+        return "midday"
+    return "afternoon"
+
+
+def _sample_leg_weather(
+    p1: tuple[float, float],
+    p2: tuple[float, float],
+    weather_cells: list,
+    timed_cells: Optional[dict] = None,
+    time_window: Optional[str] = None,
+    n_samples: int = 3,
+) -> list:
+    """Sample weather at multiple points along a leg.
+
+    Returns list of nearest WeatherCell objects for evenly-spaced
+    sample points along the leg (at 25%, 50%, 75% by default).
+    Uses time-specific cells if available for temporal accuracy.
+    """
+    cells_to_search = weather_cells
+    if timed_cells and time_window and time_window in timed_cells:
+        tw_cells = timed_cells[time_window]
+        if tw_cells:
+            cells_to_search = tw_cells
+
+    samples = []
+    for i in range(1, n_samples + 1):
+        frac = i / (n_samples + 1)
+        lat = p1[0] + frac * (p2[0] - p1[0])
+        lon = p1[1] + frac * (p2[1] - p1[1])
+        cell = _nearest_cell(lat, lon, cells_to_search)
+        if cell:
+            samples.append(cell)
+    return samples
+
+
+def _average_wind_direction(weather_cells: list) -> Optional[float]:
+    """Compute the prevailing wind direction from weather cells (vector average)."""
+    sin_sum = 0.0
+    cos_sum = 0.0
+    count = 0
+    for c in weather_cells:
+        if c.wind_dir is not None and c.wind_speed_kts is not None and c.wind_speed_kts > 2:
+            rad = math.radians(c.wind_dir)
+            w = c.wind_speed_kts
+            sin_sum += w * math.sin(rad)
+            cos_sum += w * math.cos(rad)
+            count += 1
+    if count == 0:
+        return None
+    return (math.degrees(math.atan2(sin_sum, cos_sum)) + 360) % 360
+
+
 def score_candidate(
     points: list[tuple[float, float]],
     target_km: float,
@@ -304,19 +387,24 @@ def score_candidate(
     airspace_result: Optional[dict] = None,
     terrain_result: Optional[dict] = None,
     safety_profile: str = "standard",
+    timed_cells: Optional[dict] = None,
+    takeoff_hour: float = 11.0,
+    max_duration_hours: float = 4.0,
 ) -> CandidateRoute:
     """Score a single candidate route.
 
     Returns a CandidateRoute with score 0-100.
-    safety_profile affects route-type preference:
-      - conservative/standard: multi-leg (triangle) routes get a bonus,
-        out-and-return routes get a penalty.
-      - aggressive: no route-type bias.
+
+    Improvements over v1:
+      - Samples weather at 3 points per leg instead of just midpoint
+      - Uses time-bucketed weather cells (morning/midday/afternoon)
+      - Penalises routes starting downwind (wind alignment score)
     """
     total_dist = _route_distance(points)
+    n_total_legs = len(points) - 1
 
     # 1. Distance match (0-25 pts)
-    dist_error = abs(total_dist - target_km) / target_km
+    dist_error = abs(total_dist - target_km) / target_km if target_km > 0 else 1.0
     if dist_error <= 0.05:
         distance_score = 25.0
     elif dist_error <= 0.10:
@@ -328,42 +416,57 @@ def score_candidate(
     else:
         distance_score = max(0, 25 - dist_error * 50)
 
-    # 2. Thermal coverage (0-30 pts)
+    # 2. Thermal coverage (0-30 pts) — multi-point sampling with time awareness
     thermal_score = 0.0
-    thermal_legs = 0
+    thermal_legs = 0.0
     legs = []
-    for i in range(len(points) - 1):
+    for i in range(n_total_legs):
         p1, p2 = points[i], points[i + 1]
         dist = _haversine(p1[0], p1[1], p2[0], p2[1])
         brng = _bearing(p1[0], p1[1], p2[0], p2[1])
 
-        # Sample midpoint weather
-        mid_lat = (p1[0] + p2[0]) / 2
-        mid_lon = (p1[1] + p2[1]) / 2
-        cell = _nearest_cell(mid_lat, mid_lon, weather_cells)
+        # Estimate time window for this leg
+        tw = _estimate_time_window(i, n_total_legs, takeoff_hour, max_duration_hours)
+
+        # Sample weather at 3 points along the leg (25%, 50%, 75%)
+        sample_cells = _sample_leg_weather(p1, p2, weather_cells, timed_cells, tw)
 
         tq = None
         wind_comp = None
-        if cell:
-            # Thermal quality for this leg
-            bl_ok = cell.bl_height is not None and cell.bl_height >= 1200
-            ti_ok = cell.thermal_index is not None and cell.thermal_index >= 3.0
-            if bl_ok and ti_ok:
-                thermal_legs += 1
-                tq = round(cell.thermal_index, 1)
-            elif bl_ok or ti_ok:
-                thermal_legs += 0.5
-                tq = round((cell.thermal_index or 0), 1)
+        leg_thermal_quality = 0.0
 
-            # Wind component
-            if cell.wind_speed_kts is not None and cell.wind_dir is not None:
-                wc = calculate_wind_components(cell.wind_dir, cell.wind_speed_kts, brng)
-                wind_comp = wc["headwind"]
+        if sample_cells:
+            # Aggregate thermal quality across all samples
+            good_samples = 0.0
+            thermal_values = []
+            wind_values = []
+
+            for cell in sample_cells:
+                bl_ok = cell.bl_height is not None and cell.bl_height >= 1200
+                ti_ok = cell.thermal_index is not None and cell.thermal_index >= 3.0
+                if bl_ok and ti_ok:
+                    good_samples += 1.0
+                    thermal_values.append(cell.thermal_index)
+                elif bl_ok or ti_ok:
+                    good_samples += 0.5
+                    thermal_values.append(cell.thermal_index or 0)
+
+                if cell.wind_speed_kts is not None and cell.wind_dir is not None:
+                    wc = calculate_wind_components(cell.wind_dir, cell.wind_speed_kts, brng)
+                    wind_values.append(wc["headwind"])
+
+            # Leg thermal quality = fraction of good samples
+            n_samples = len(sample_cells)
+            leg_thermal_quality = good_samples / n_samples if n_samples else 0
+            thermal_legs += leg_thermal_quality
+
+            tq = round(sum(thermal_values) / len(thermal_values), 1) if thermal_values else None
+            wind_comp = round(sum(wind_values) / len(wind_values), 1) if wind_values else None
 
         legs.append(TaskLeg(
             from_name=f"TP{i}" if i > 0 else "Takeoff",
             from_lat=p1[0], from_lon=p1[1],
-            to_name=f"TP{i+1}" if i + 1 < len(points) - 1 else "Finish",
+            to_name=f"TP{i+1}" if i + 1 < n_total_legs else "Finish",
             to_lat=p2[0], to_lon=p2[1],
             distance_km=dist,
             bearing=brng,
@@ -374,28 +477,101 @@ def score_candidate(
     n_legs = len(legs) if legs else 1
     thermal_score = (thermal_legs / n_legs) * 30
 
-    # 3. Wind exposure (0-20 pts) — minimize headwind on longest leg
+    # 3. Wind exposure (0-20 pts) — reward longest leg downwind, penalise headwind
     wind_score = 20.0
     longest_leg = max(legs, key=lambda l: l.distance_km) if legs else None
     if longest_leg and longest_leg.wind_component_kts is not None:
         hw = longest_leg.wind_component_kts
         if hw > 15:
-            wind_score = 5.0
+            wind_score = 2.0
         elif hw > 10:
-            wind_score = 10.0
+            wind_score = 7.0
         elif hw > 5:
-            wind_score = 15.0
-        # Tailwind bonus
+            wind_score = 12.0
+        elif hw > 0:
+            wind_score = 16.0
+        # Tailwind on longest leg — this is ideal for asymmetric routes
         if hw < -5:
-            wind_score = min(20, wind_score + 5)
+            wind_score = 20.0  # full marks for tailwind on longest leg
+
+    # Wind alignment bonus: first leg into wind AND longest leg downwind
+    wind_alignment_bonus = 0.0
+    if safety_profile in ("conservative", "standard") and legs:
+        avg_wind_dir = _average_wind_direction(weather_cells)
+        if avg_wind_dir is not None:
+            first_leg_bearing = legs[0].bearing
+            # Angle between first leg and wind direction (wind comes FROM wind_dir)
+            angle_diff = abs(first_leg_bearing - avg_wind_dir)
+            if angle_diff > 180:
+                angle_diff = 360 - angle_diff
+            # 0° = flying directly into wind (best), 180° = downwind start (worst)
+            if angle_diff < 45:
+                wind_alignment_bonus = 8.0  # flying into wind — strongly rewarded
+            elif angle_diff < 90:
+                wind_alignment_bonus = 3.0  # crosswind start
+            elif angle_diff > 135:
+                wind_alignment_bonus = -8.0  # downwind start — strongly penalised
+
+            # Bonus for longest leg being downwind (asymmetric triangle advantage)
+            if longest_leg:
+                longest_bearing = longest_leg.bearing
+                # Ideal: longest leg bearing ≈ wind_dir + 180° (flying with the wind)
+                downwind_bearing = (avg_wind_dir + 180) % 360
+                dw_diff = abs(longest_bearing - downwind_bearing)
+                if dw_diff > 180:
+                    dw_diff = 360 - dw_diff
+                if dw_diff < 30:
+                    wind_alignment_bonus += 7.0  # longest leg is nearly pure downwind
+                elif dw_diff < 60:
+                    wind_alignment_bonus += 4.0  # longest leg has strong downwind component
+                elif dw_diff < 90:
+                    wind_alignment_bonus += 1.0  # some downwind component
+
+    # 3b. Airport proximity score (0-15 pts) — reward routes that keep pilot close to home
+    proximity_bonus = 0.0
+    if safety_profile in ("conservative", "standard") and len(points) >= 4:
+        # Calculate max distance of any turnpoint from home
+        home_lat, home_lon = points[0]
+        tp_distances = [
+            _haversine(home_lat, home_lon, p[0], p[1])
+            for p in points[1:-1]
+        ]
+        if tp_distances:
+            max_tp_dist = max(tp_distances)
+            # Ratio: farthest turnpoint distance / half of target_km
+            # For equilateral triangle (120km): each leg ~40km, TPs ~35-40km away → ratio ~0.65
+            # For asymmetric (25/45/30): TP1 ~25km away → good, but TP2 ~45km → ratio ~0.75
+            # Key: check if the CLOSEST turnpoint is much closer (asymmetric benefit)
+            min_tp_dist = min(tp_distances)
+            half_target = target_km / 2.0 if target_km > 0 else 1.0
+
+            # Reward when nearest TP is close to home (asymmetric advantage)
+            near_ratio = min_tp_dist / half_target
+            if near_ratio < 0.45:
+                proximity_bonus = 12.0  # nearest TP very close to home
+            elif near_ratio < 0.55:
+                proximity_bonus = 8.0
+            elif near_ratio < 0.70:
+                proximity_bonus = 4.0
+            else:
+                proximity_bonus = 0.0  # all TPs far from home (equilateral)
+
+            # Extra penalty if farthest TP is very far from home
+            far_ratio = max_tp_dist / half_target
+            if far_ratio > 1.0:
+                proximity_bonus -= 3.0
+
+            if safety_profile == "conservative":
+                proximity_bonus *= 1.5  # extra weight for conservative
+            proximity_bonus = max(0.0, proximity_bonus)
 
     # 4. Terrain clearance (0-15 pts)
-    terrain_score = 15.0  # default OK if no data
+    terrain_score = 15.0
     if terrain_result:
         if not terrain_result.get("safe", True):
             terrain_score = 0.0
         elif terrain_result.get("max_terrain_m", 0) > 1500:
-            terrain_score = 10.0  # mountainous but passable
+            terrain_score = 10.0
 
     # 5. Airspace safety (0-10 pts)
     airspace_score = 10.0
@@ -408,24 +584,45 @@ def score_candidate(
         elif n_conflicts > 0:
             airspace_score = 7.0
 
-    total_score = distance_score + thermal_score + wind_score + terrain_score + airspace_score
+    total_score = (distance_score + thermal_score + wind_score
+                   + terrain_score + airspace_score + wind_alignment_bonus
+                   + proximity_bonus)
 
     # 6. Route-type preference based on safety profile (bonus/penalty)
-    n_turnpoints = len(points) - 2  # exclude takeoff & finish
     is_out_and_return = (len(points) == 3 and points[0] == points[2])
     is_triangle = (len(points) >= 4 and points[0] == points[-1])
 
     route_type_bonus = 0.0
     if safety_profile in ("conservative", "standard"):
         if is_triangle:
-            # Multi-leg routes keep the pilot within glide range of takeoff
             route_type_bonus = 15.0 if safety_profile == "conservative" else 10.0
             logger.debug("Triangle route +%.0f bonus (safety=%s)", route_type_bonus, safety_profile)
         elif is_out_and_return:
-            # Out-and-return penalised: single leg far from base
             route_type_bonus = -10.0 if safety_profile == "conservative" else -5.0
             logger.debug("Out-and-return %.0f penalty (safety=%s)", route_type_bonus, safety_profile)
     total_score += route_type_bonus
+
+    # 7. Leg asymmetry bonus (0-15 pts) — directly reward triangles with unequal legs
+    # Coefficient of variation (CV) of leg lengths: 0 for equilateral, ~0.25+ for asymmetric.
+    # This is the primary differentiator when wind data is missing.
+    asymmetry_bonus = 0.0
+    if is_triangle and len(legs) >= 3 and safety_profile in ("conservative", "standard"):
+        leg_dists = [l.distance_km for l in legs]
+        mean_dist = sum(leg_dists) / len(leg_dists)
+        if mean_dist > 0:
+            variance = sum((d - mean_dist) ** 2 for d in leg_dists) / len(leg_dists)
+            cv = math.sqrt(variance) / mean_dist
+            if cv > 0.30:
+                asymmetry_bonus = 15.0
+            elif cv > 0.20:
+                asymmetry_bonus = 12.0
+            elif cv > 0.10:
+                asymmetry_bonus = 8.0
+            elif cv > 0.05:
+                asymmetry_bonus = 4.0
+            if safety_profile == "conservative":
+                asymmetry_bonus *= 1.3
+    total_score += asymmetry_bonus
 
     route = CandidateRoute(
         legs=legs,
@@ -445,9 +642,10 @@ def score_candidate(
 
     logger.debug(
         "Scored route: %s | dist=%.1fkm | score=%.1f "
-        "(dist=%.0f therm=%.0f wind=%.0f terrain=%.0f airsp=%.0f type_bonus=%.0f)",
+        "(dist=%.0f therm=%.0f wind=%.0f+align=%.0f prox=%.0f asym=%.0f terrain=%.0f airsp=%.0f type_bonus=%.0f)",
         route.description, total_dist, total_score,
-        distance_score, thermal_score, wind_score, terrain_score, airspace_score, route_type_bonus,
+        distance_score, thermal_score, wind_score, wind_alignment_bonus,
+        proximity_bonus, asymmetry_bonus, terrain_score, airspace_score, route_type_bonus,
     )
 
     return route
@@ -456,6 +654,251 @@ def score_candidate(
 # ---------------------------------------------------------------------------
 # Main optimizer
 # ---------------------------------------------------------------------------
+
+# Leg-length ratios for asymmetric triangles by safety profile.
+# Pattern: short upwind leg → long downwind leg → short return.
+# Conservative keeps the pilot closer to home; aggressive allows longer upwind legs.
+_ASYM_RATIOS: dict[str, list[tuple[float, float, float]]] = {
+    "conservative": [
+        (0.20, 0.50, 0.30),  # 20% upwind, 50% downwind, 30% return
+        (0.25, 0.45, 0.30),
+        (0.22, 0.48, 0.30),
+    ],
+    "standard": [
+        (0.25, 0.45, 0.30),  # 25% upwind, 45% downwind, 30% return
+        (0.28, 0.42, 0.30),
+        (0.30, 0.40, 0.30),
+    ],
+    "aggressive": [
+        (0.30, 0.40, 0.30),  # more balanced for aggressive pilots
+        (0.33, 0.34, 0.33),  # nearly equilateral
+        (0.35, 0.35, 0.30),
+    ],
+}
+
+
+def _generate_wind_biased_triangles(
+    takeoff_lat: float, takeoff_lon: float,
+    target_km: float,
+    wind_dir: Optional[float],
+    safety_profile: str = "standard",
+    n_rotations: int = 6,
+) -> list[list[tuple[float, float]]]:
+    """Generate asymmetric triangle candidates biased to start into the wind.
+
+    Leg 1 (short) flies INTO the wind so the pilot stays close to home.
+    Leg 2 (long) flies WITH the wind — the longest leg is safest downwind.
+    Leg 3 (medium) returns to the airport.
+
+    Example with 150km task and north wind (conservative):
+      Leg 1: 30km north (into wind — short, stays close to home)
+      Leg 2: 75km south (with tailwind — long, efficient)
+      Leg 3: 45km north-east back to airport
+
+    When wind_dir is None (no wind data), generates asymmetric triangles
+    at evenly-spaced bearings (full 360°) so that proximity-to-home and
+    asymmetric-leg benefits still apply regardless of wind knowledge.
+
+    Rotations spread around the upwind direction (or full circle if unknown).
+    Leg ratios vary by safety profile.
+    """
+    routes = []
+    ratios = _ASYM_RATIOS.get(safety_profile, _ASYM_RATIOS["standard"])
+
+    if wind_dir is not None:
+        # Wind-aware: cluster rotations around the upwind direction
+        upwind_bearing = wind_dir
+        spread = 120.0
+        for ratio in ratios:
+            leg1_frac = ratio[0]
+            leg2_frac = ratio[1]
+            for i in range(n_rotations):
+                offset = -spread / 2 + (spread / max(1, n_rotations - 1)) * i
+                base_bearing = (upwind_bearing + offset) % 360
+                route = _build_asymmetric_triangle(
+                    takeoff_lat, takeoff_lon, target_km,
+                    base_bearing, leg1_frac, leg2_frac,
+                )
+                routes.append(route)
+    else:
+        # No wind: generate asymmetric triangles at full 360° rotation
+        # so the proximity/asymmetry advantages still apply.
+        n_full = max(n_rotations, 12)
+        for ratio in ratios:
+            leg1_frac = ratio[0]
+            leg2_frac = ratio[1]
+            for i in range(n_full):
+                base_bearing = (360.0 / n_full) * i
+                route = _build_asymmetric_triangle(
+                    takeoff_lat, takeoff_lon, target_km,
+                    base_bearing, leg1_frac, leg2_frac,
+                )
+                routes.append(route)
+    return routes
+
+
+def _build_asymmetric_triangle(
+    takeoff_lat: float, takeoff_lon: float,
+    target_km: float,
+    base_bearing: float,
+    leg1_frac: float, leg2_frac: float,
+) -> list[tuple[float, float]]:
+    """Build a single asymmetric triangle and rescale so total ≈ target_km."""
+    raw_leg1_km = target_km * leg1_frac
+    raw_leg2_km = target_km * leg2_frac
+
+    tp1 = _destination(takeoff_lat, takeoff_lon, base_bearing, raw_leg1_km)
+    tp2 = _destination(tp1[0], tp1[1], (base_bearing + 130) % 360, raw_leg2_km)
+
+    # Measure actual total and rescale to hit target distance
+    raw_total = (
+        _haversine(takeoff_lat, takeoff_lon, tp1[0], tp1[1])
+        + _haversine(tp1[0], tp1[1], tp2[0], tp2[1])
+        + _haversine(tp2[0], tp2[1], takeoff_lat, takeoff_lon)
+    )
+    if raw_total > 0:
+        scale = target_km / raw_total
+    else:
+        scale = 1.0
+    scaled_leg1 = raw_leg1_km * scale
+    scaled_leg2 = raw_leg2_km * scale
+
+    tp1 = _destination(takeoff_lat, takeoff_lon, base_bearing, scaled_leg1)
+    tp2 = _destination(tp1[0], tp1[1], (base_bearing + 130) % 360, scaled_leg2)
+
+    return [
+        (takeoff_lat, takeoff_lon),
+        tp1,
+        tp2,
+        (takeoff_lat, takeoff_lon),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Turnpoint → town name lookup (Overpass / OSM)
+# ---------------------------------------------------------------------------
+
+def _fetch_nearby_towns(
+    points: list[tuple[float, float]],
+    radius_km: float = 10.0,
+) -> dict[tuple[float, float], dict]:
+    """Query Overpass for towns/villages near the given points.
+
+    Returns a mapping from (lat, lon) → {name, lat, lon, place_type, distance_km}
+    for the closest settlement to each point.
+    Only queries once with a bbox covering all points.
+    """
+    if not points:
+        return {}
+
+    # Build a bounding box covering all points + radius
+    deg_margin = radius_km / 111.0  # rough km-to-degree conversion
+    min_lat = min(p[0] for p in points) - deg_margin
+    max_lat = max(p[0] for p in points) + deg_margin
+    min_lon = min(p[1] for p in points) - deg_margin * 1.5  # lon degrees are narrower
+    max_lon = max(p[1] for p in points) + deg_margin * 1.5
+
+    bbox = f"{min_lat:.4f},{min_lon:.4f},{max_lat:.4f},{max_lon:.4f}"
+    query = (
+        f'[out:json][timeout:15];'
+        f'(node["place"~"^(city|town|village)$"]({bbox}););'
+        f'out body;'
+    )
+
+    try:
+        resp = _requests.post(
+            _OVERPASS_URL,
+            data={"data": query},
+            timeout=15,
+            headers={"User-Agent": "SoaringCup/1.0 task-planner"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        logger.warning("Overpass town lookup failed", exc_info=True)
+        return {}
+
+    # Parse OSM elements
+    towns: list[dict] = []
+    for el in data.get("elements", []):
+        tags = el.get("tags", {})
+        name = tags.get("name") or tags.get("name:en")
+        if not name:
+            continue
+        towns.append({
+            "name": name,
+            "lat": el["lat"],
+            "lon": el["lon"],
+            "place_type": tags.get("place", ""),
+        })
+
+    if not towns:
+        return {}
+
+    # Prefer larger settlements — they are easier to spot from the air.
+    # effective_distance = real_distance × weight  (lower = better)
+    _place_weight = {"city": 0.25, "town": 0.50, "village": 1.0}
+
+    result: dict[tuple[float, float], dict] = {}
+    for pt in points:
+        best = None
+        best_eff = float("inf")
+        for t in towns:
+            d = _haversine(pt[0], pt[1], t["lat"], t["lon"])
+            if d > radius_km:
+                continue
+            eff = d * _place_weight.get(t["place_type"], 1.0)
+            if eff < best_eff:
+                best_eff = eff
+                best = {**t, "distance_km": round(d, 1)}
+        if best:
+            result[pt] = best
+
+    logger.info("Town lookup: %d/%d turnpoints matched to towns (%d candidates)",
+                len(result), len(points), len(towns))
+    return result
+
+
+def _label_route_with_towns(
+    route: CandidateRoute,
+    town_map: dict[tuple[float, float], dict],
+    takeoff_name: str = "Takeoff",
+) -> None:
+    """Update leg from/to names and route description with town names."""
+    for leg in route.legs:
+        # Check 'from' point
+        from_pt = (round(leg.from_lat, 4), round(leg.from_lon, 4))
+        if from_pt in town_map:
+            leg.from_name = town_map[from_pt]["name"]
+        elif leg.from_name in ("Takeoff",):
+            pass  # keep takeoff name
+        # Check 'to' point
+        to_pt = (round(leg.to_lat, 4), round(leg.to_lon, 4))
+        if to_pt in town_map:
+            leg.to_name = town_map[to_pt]["name"]
+        elif leg.to_name in ("Finish",):
+            pass  # keep finish name
+
+    # Rebuild description with town names
+    tp_names = []
+    for leg in route.legs[:-1]:  # all legs except last (which ends at finish)
+        tp_names.append(leg.to_name)
+
+    is_oar = (len(route.turnpoints) == 3
+              and route.turnpoints[0] == route.turnpoints[2])
+    is_tri = (len(route.turnpoints) >= 4
+              and route.turnpoints[0] == route.turnpoints[-1])
+
+    if is_oar:
+        route.description = (f"Out-and-return via {tp_names[0] if tp_names else '?'}, "
+                             f"{route.total_distance_km:.0f}km")
+    elif is_tri:
+        route.description = (f"Triangle via {', '.join(tp_names)}, "
+                             f"{route.total_distance_km:.0f}km")
+    else:
+        route.description = (f"Task via {', '.join(tp_names)}, "
+                             f"{route.total_distance_km:.0f}km")
+
 
 def optimize_task(
     takeoff_lat: float,
@@ -471,6 +914,9 @@ def optimize_task(
     airspace_checker=None,
     terrain_checker=None,
     top_n: int = 5,
+    timed_cells: Optional[dict] = None,
+    takeoff_hour: float = 11.0,
+    max_duration_hours: float = 4.0,
 ) -> list[CandidateRoute]:
     """Generate and score candidate routes, return top N.
 
@@ -485,12 +931,35 @@ def optimize_task(
         airspace_checker: callable(points) -> airspace dict (optional, per-route)
         terrain_checker: callable(points) -> terrain result (optional)
         top_n: number of top candidates to return
+        timed_cells: dict of time-windowed weather cells from weather.py
+        takeoff_hour: estimated takeoff hour (local time)
+        max_duration_hours: expected flight duration
     """
     raw_candidates = generate_candidates(
         takeoff_lat, takeoff_lon, target_km,
         dest_lat=dest_lat, dest_lon=dest_lon,
         soaring_mode=soaring_mode,
     )
+
+    # Generate asymmetric triangle candidates — ALWAYS, not just when wind is known.
+    # When wind is available, candidates cluster around the upwind direction.
+    # When wind is missing, candidates cover all bearings so the proximity-to-home
+    # and asymmetric-leg scoring advantages still differentiate them from equilateral.
+    avg_wind_dir = _average_wind_direction(weather_cells)
+    same_airport = (
+        dest_lat is None or dest_lon is None
+        or _haversine(takeoff_lat, takeoff_lon, dest_lat or 0, dest_lon or 0) < 5
+    )
+    if same_airport:
+        wind_biased = _generate_wind_biased_triangles(
+            takeoff_lat, takeoff_lon, target_km, avg_wind_dir,
+            safety_profile=safety_profile, n_rotations=6,
+        )
+        raw_candidates.extend(wind_biased)
+        logger.info("Added %d asymmetric triangle candidates (wind_dir=%s)",
+                    len(wind_biased),
+                    f"{avg_wind_dir:.0f}°" if avg_wind_dir is not None else "unknown")
+
     n_oar = sum(1 for c in raw_candidates if len(c) == 3 and c[0] == c[2])
     n_tri = sum(1 for c in raw_candidates if len(c) >= 4 and c[0] == c[-1])
     n_other = len(raw_candidates) - n_oar - n_tri
@@ -526,7 +995,13 @@ def optimize_task(
         if airspace_checker:
             try:
                 route_airspace = airspace_checker(points)
-                if route_airspace and route_airspace.get("has_blocking_conflict"):
+                if route_airspace is None:
+                    # Airspace check failed — fail-closed: skip candidate
+                    # rather than allowing a potentially unsafe route through.
+                    skipped_airspace += 1
+                    logger.debug("Skipped route: airspace check returned None (fail-closed)")
+                    continue
+                if route_airspace.get("has_blocking_conflict"):
                     skipped_airspace += 1
                     logger.debug(
                         "Skipped route: blocking airspace conflict (%s)",
@@ -534,7 +1009,10 @@ def optimize_task(
                     )
                     continue
             except Exception:
-                logger.debug("Per-route airspace check failed", exc_info=True)
+                # Exception during check — fail-closed: skip candidate
+                skipped_airspace += 1
+                logger.debug("Skipped route: airspace check raised (fail-closed)", exc_info=True)
+                continue
 
         # Optional terrain check per candidate
         terrain_result = None
@@ -549,6 +1027,9 @@ def optimize_task(
             airspace_result=route_airspace,
             terrain_result=terrain_result,
             safety_profile=safety_profile,
+            timed_cells=timed_cells,
+            takeoff_hour=takeoff_hour,
+            max_duration_hours=max_duration_hours,
         )
         scored.append(route)
 
@@ -563,6 +1044,19 @@ def optimize_task(
     scored.sort(key=lambda r: r.score, reverse=True)
 
     top = scored[:top_n]
+
+    # Label top candidates with nearby town names (single Overpass lookup)
+    all_turnpoints = set()
+    for r in top:
+        for pt in r.turnpoints[1:-1]:  # skip takeoff/finish
+            all_turnpoints.add((round(pt[0], 4), round(pt[1], 4)))
+
+    if all_turnpoints:
+        town_map = _fetch_nearby_towns(list(all_turnpoints), radius_km=12.0)
+        takeoff_label = "Takeoff"
+        for r in top:
+            _label_route_with_towns(r, town_map, takeoff_name=takeoff_label)
+
     for i, r in enumerate(top):
         logger.info("  #%d: %s (score=%.1f)", i + 1, r.description, r.score)
     return top
