@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 # Overpass API for reverse-geocoding turnpoints to nearby towns
 _OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
+# Nominatim for forward-geocoding place names from custom instructions
+_NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
+
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -290,6 +293,116 @@ def generate_candidates(
         candidates.extend(_generate_triangles(takeoff_lat, takeoff_lon, target_km, 8))
 
     return candidates
+
+
+# ---------------------------------------------------------------------------
+# Preferred-waypoint candidate generation
+# ---------------------------------------------------------------------------
+
+def geocode_place(
+    name: str,
+    bias_lat: float,
+    bias_lon: float,
+    radius_km: float = 300,
+) -> Optional[tuple[float, float]]:
+    """Resolve a place name to (lat, lon) using Nominatim, biased near a point."""
+    try:
+        resp = _requests.get(
+            _NOMINATIM_SEARCH_URL,
+            params={
+                "q": name,
+                "format": "json",
+                "limit": 5,
+                "viewbox": _viewbox(bias_lat, bias_lon, radius_km),
+                "bounded": 1,
+            },
+            headers={"User-Agent": "GlidePlan/1.0"},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        results = resp.json()
+        if not results:
+            logger.info("Nominatim: no results for '%s'", name)
+            return None
+        # Pick the closest result to the bias point
+        best = min(results, key=lambda r: _haversine(
+            bias_lat, bias_lon, float(r["lat"]), float(r["lon"])))
+        lat, lon = float(best["lat"]), float(best["lon"])
+        logger.info("Geocoded '%s' → %.4f, %.4f (%s)", name, lat, lon, best.get("display_name", ""))
+        return (lat, lon)
+    except Exception:
+        logger.warning("Nominatim geocode failed for '%s'", name, exc_info=True)
+        return None
+
+
+def _viewbox(lat: float, lon: float, radius_km: float) -> str:
+    """Create a Nominatim viewbox string around a point."""
+    dlat = radius_km / 111.0
+    dlon = radius_km / (111.0 * max(math.cos(math.radians(lat)), 0.01))
+    return f"{lon - dlon},{lat + dlat},{lon + dlon},{lat - dlat}"
+
+
+def _generate_waypoint_routes(
+    takeoff_lat: float,
+    takeoff_lon: float,
+    target_km: float,
+    waypoints: list[tuple[float, float]],
+    dest_lat: Optional[float] = None,
+    dest_lon: Optional[float] = None,
+) -> list[list[tuple[float, float]]]:
+    """Generate candidate routes that pass through specific waypoints.
+
+    For each preferred waypoint, generates:
+    - Out-and-return through that waypoint
+    - Triangles using that waypoint as one turnpoint (8 rotations for TP2)
+    """
+    same_airport = (
+        dest_lat is None or dest_lon is None
+        or _haversine(takeoff_lat, takeoff_lon, dest_lat or 0, dest_lon or 0) < 5
+    )
+    finish = (dest_lat, dest_lon) if not same_airport else (takeoff_lat, takeoff_lon)
+    routes: list[list[tuple[float, float]]] = []
+
+    for wp in waypoints:
+        wp_dist = _haversine(takeoff_lat, takeoff_lon, wp[0], wp[1])
+
+        # Out-and-return through the waypoint
+        if same_airport:
+            routes.append([(takeoff_lat, takeoff_lon), wp, (takeoff_lat, takeoff_lon)])
+        else:
+            routes.append([(takeoff_lat, takeoff_lon), wp, finish])
+
+        # Triangles: waypoint as TP1, generate TP2 at various bearings
+        if same_airport:
+            bearing_from_home = _bearing(takeoff_lat, takeoff_lon, wp[0], wp[1])
+            remaining_dist = target_km - wp_dist
+            for i in range(8):
+                # Spread TP2 at angles relative to the wp→home bearing
+                offset_angle = (360.0 / 8) * i
+                tp2_bearing = (bearing_from_home + 90 + offset_angle) % 360
+                tp2_dist = remaining_dist * 0.45  # roughly balance the triangle
+                tp2 = _destination(wp[0], wp[1], tp2_bearing, max(tp2_dist, 10))
+                routes.append([
+                    (takeoff_lat, takeoff_lon),
+                    wp,
+                    tp2,
+                    (takeoff_lat, takeoff_lon),
+                ])
+
+                # Also try wp as TP2 instead of TP1
+                tp1_bearing = (bearing_from_home + offset_angle) % 360
+                tp1_dist = (target_km - wp_dist) * 0.45
+                tp1 = _destination(takeoff_lat, takeoff_lon, tp1_bearing, max(tp1_dist, 10))
+                routes.append([
+                    (takeoff_lat, takeoff_lon),
+                    tp1,
+                    wp,
+                    (takeoff_lat, takeoff_lon),
+                ])
+
+    logger.info("Generated %d waypoint-based candidates for %d preferred waypoints",
+                len(routes), len(waypoints))
+    return routes
 
 
 # ---------------------------------------------------------------------------
@@ -917,6 +1030,7 @@ def optimize_task(
     timed_cells: Optional[dict] = None,
     takeoff_hour: float = 11.0,
     max_duration_hours: float = 4.0,
+    preferred_waypoints: Optional[list[tuple[float, float]]] = None,
 ) -> list[CandidateRoute]:
     """Generate and score candidate routes, return top N.
 
@@ -934,6 +1048,7 @@ def optimize_task(
         timed_cells: dict of time-windowed weather cells from weather.py
         takeoff_hour: estimated takeoff hour (local time)
         max_duration_hours: expected flight duration
+        preferred_waypoints: list of (lat, lon) that the user wants in the route
     """
     raw_candidates = generate_candidates(
         takeoff_lat, takeoff_lon, target_km,
@@ -959,6 +1074,15 @@ def optimize_task(
         logger.info("Added %d asymmetric triangle candidates (wind_dir=%s)",
                     len(wind_biased),
                     f"{avg_wind_dir:.0f}°" if avg_wind_dir is not None else "unknown")
+
+    # Generate routes through user-preferred waypoints
+    if preferred_waypoints:
+        wp_routes = _generate_waypoint_routes(
+            takeoff_lat, takeoff_lon, target_km, preferred_waypoints,
+            dest_lat=dest_lat if not same_airport else None,
+            dest_lon=dest_lon if not same_airport else None,
+        )
+        raw_candidates.extend(wp_routes)
 
     n_oar = sum(1 for c in raw_candidates if len(c) == 3 and c[0] == c[2])
     n_tri = sum(1 for c in raw_candidates if len(c) >= 4 and c[0] == c[-1])

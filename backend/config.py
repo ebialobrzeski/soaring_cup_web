@@ -17,11 +17,10 @@ BASE_URL: str = os.environ.get('BASE_URL', '')
 # Database
 DATABASE_URL: str = os.environ.get('DATABASE_URL', '')
 
-# AI Services
+# AI Services (legacy direct fallback only — primary AI uses user-provided OpenRouter keys)
 GEMINI_API_KEY: str = os.environ.get('GEMINI_API_KEY', '')
 GROQ_API_KEY: str = os.environ.get('GROQ_API_KEY', '')
 DEEPSEEK_API_KEY: str = os.environ.get('DEEPSEEK_API_KEY', '')
-OPENROUTER_API_KEY: str = os.environ.get('OPENROUTER_API_KEY', '')
 
 # Weather APIs
 IMGW_API_BASE_URL: str = os.environ.get('IMGW_API_BASE_URL', 'https://danepubliczne.imgw.pl/api/data')

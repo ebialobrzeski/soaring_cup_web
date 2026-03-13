@@ -93,6 +93,12 @@
             const val = _translations[key];
             if (val !== undefined) el.setAttribute('summary', val);
         });
+        // HTML content (innerHTML — use for trusted pre-translated markup only)
+        document.querySelectorAll('[data-i18n-html]').forEach(el => {
+            const key = el.getAttribute('data-i18n-html');
+            const val = _translations[key];
+            if (val !== undefined) el.innerHTML = val;
+        });
         // HTML lang attribute
         document.documentElement.lang = _currentLang;
     }

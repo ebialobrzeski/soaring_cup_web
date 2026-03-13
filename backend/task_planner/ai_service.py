@@ -28,7 +28,6 @@ from backend.config import (
     DEEPSEEK_API_KEY,
     GEMINI_API_KEY,
     GROQ_API_KEY,
-    OPENROUTER_API_KEY,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,7 +59,39 @@ def safe_json_parse(text: str) -> Optional[dict]:
 
         # Step 3: fix common LLM artifacts
         candidate = re.sub(r',\s*([}\]])', r'\1', candidate)  # trailing commas
-        candidate = re.sub(r'[\x00-\x1F\x7F](?=[^"]*")', ' ', candidate)  # control chars
+        candidate = re.sub(r'[\x00-\x1F\x7F](?=[^"]*")', ' ', candidate)  # control chars near quotes
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+
+        # Step 4: escape unescaped control chars inside JSON string values
+        # This handles literal newlines/tabs inside "explanation" etc.
+        def _escape_control_in_strings(s: str) -> str:
+            """Walk through JSON text and escape control chars inside string literals."""
+            out = []
+            in_string = False
+            escaped = False
+            for ch in s:
+                if escaped:
+                    out.append(ch)
+                    escaped = False
+                    continue
+                if ch == '\\' and in_string:
+                    out.append(ch)
+                    escaped = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    out.append(ch)
+                    continue
+                if in_string and ch in ('\n', '\r', '\t'):
+                    out.append({'\n': '\\n', '\r': '\\r', '\t': '\\t'}[ch])
+                    continue
+                out.append(ch)
+            return ''.join(out)
+
+        candidate = _escape_control_in_strings(candidate)
         try:
             return json.loads(candidate)
         except json.JSONDecodeError:
@@ -86,13 +117,14 @@ _OPENROUTER_MODELS = [
 _OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
-def _call_openrouter(prompt: str, system: str = "") -> tuple[str, str, dict]:
+def _call_openrouter(prompt: str, system: str = "", api_key_override: str = "") -> tuple[str, str, dict]:
     """Call OpenRouter with model fallback chain.
 
     Returns (response_text, model_used, call_stats).
     """
-    if not OPENROUTER_API_KEY:
-        raise ValueError("OPENROUTER_API_KEY not configured")
+    api_key = api_key_override
+    if not api_key:
+        raise ValueError("No OpenRouter API key provided")
 
     messages: list[dict[str, str]] = []
     if system:
@@ -121,7 +153,7 @@ def _call_openrouter(prompt: str, system: str = "") -> tuple[str, str, dict]:
         resp = requests.post(
             _OPENROUTER_URL,
             headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Authorization": f"Bearer {api_key}",
                 "HTTP-Referer": "https://soaring-cup.com",
                 "X-OpenRouter-Title": "Soaring Cup AI Planner",
                 "Content-Type": "application/json",
@@ -176,18 +208,19 @@ def _call_openrouter(prompt: str, system: str = "") -> tuple[str, str, dict]:
     return "", "none", stats
 
 
-def _call_ai_with_fallback(prompt: str, system: str = "") -> tuple[str, str, dict]:
-    """Primary: OpenRouter (handles Gemini → Llama → DeepSeek fallback).
+def _call_ai_with_fallback(prompt: str, system: str = "", api_key_override: str = "") -> tuple[str, str, dict]:
+    """Primary: OpenRouter with user-provided key (BYOK).
 
-    If OPENROUTER_API_KEY is not set, falls back to direct provider calls.
+    If no user key is provided, falls back to direct provider calls
+    using server-side legacy keys (if configured).
     Returns (response_text, model_name, call_stats).
     """
-    if OPENROUTER_API_KEY:
-        logger.info("Using OpenRouter (key present)")
-        return _call_openrouter(prompt, system)
+    if api_key_override:
+        logger.info("Using OpenRouter (user-provided key)")
+        return _call_openrouter(prompt, system, api_key_override=api_key_override)
 
-    # Legacy direct-call fallback (only if OpenRouter key missing)
-    logger.warning("OPENROUTER_API_KEY not set — falling back to legacy direct calls")
+    # Legacy direct-call fallback (only if no user key)
+    logger.warning("No user OpenRouter key — falling back to legacy direct calls")
     return _call_direct_fallback(prompt, system)
 
 
@@ -359,6 +392,12 @@ Wind scoring:
 - 18-25 kts = challenging (+5)
 - >25 kts = dangerous (+0); gusts >15 kts = -20 pts
 
+PILOT CUSTOM INSTRUCTIONS: If the prompt contains a "PILOT CUSTOM INSTRUCTIONS" \
+section, you MUST incorporate those preferences into your route selection and \
+narrative. For example, if the pilot requests a specific turnpoint, prefer the \
+candidate route that passes closest to it and explain this in the narrative. \
+If no candidate matches the instruction, acknowledge it and explain why.
+
 Return ONLY valid JSON. No commentary outside the JSON."""
 
 # Load custom instructions from global file (if present)
@@ -405,6 +444,7 @@ def _build_task_prompt(
     airspace_info: Optional[dict] = None,
     terrain_info: Optional[dict] = None,
     language: str = "en",
+    custom_instructions: str = "",
 ) -> str:
     """Build the prompt for final task selection and narrative."""
     safety = task_inputs.get('safety_profile', 'standard')
@@ -417,6 +457,12 @@ def _build_task_prompt(
         f"SAFETY PROFILE: {safety}",
         f"RESPONSE LANGUAGE: {lang_name}",
     ]
+
+    # User custom instructions — placed early so the model weighs them heavily
+    if custom_instructions:
+        lines.append('')
+        lines.append('PILOT CUSTOM INSTRUCTIONS (MUST be respected when selecting and describing the route):')
+        lines.append(custom_instructions)
 
     # Add safety profile guidance
     if safety == "conservative":
@@ -498,6 +544,8 @@ def generate_task_narrative(
     airspace_info: Optional[dict] = None,
     terrain_info: Optional[dict] = None,
     language: str = "en",
+    api_key_override: str = "",
+    custom_instructions: str = "",
 ) -> dict:
     """Send top candidates to LLM for final selection and narrative.
 
@@ -507,6 +555,7 @@ def generate_task_narrative(
     prompt = _build_task_prompt(
         candidates, weather_summary, task_inputs, airspace_info, terrain_info,
         language=language,
+        custom_instructions=custom_instructions,
     )
     logger.info(
         "generate_task_narrative: %d candidates, %d weather cells, target=%skm, safety=%s",
@@ -516,7 +565,7 @@ def generate_task_narrative(
     )
     logger.debug("Full task prompt (%d chars):\n%s", len(prompt), prompt)
 
-    raw_text, model, ai_stats = _call_ai_with_fallback(prompt, _SYSTEM_PROMPT)
+    raw_text, model, ai_stats = _call_ai_with_fallback(prompt, _SYSTEM_PROMPT, api_key_override=api_key_override)
 
     if raw_text:
         parsed = safe_json_parse(raw_text)

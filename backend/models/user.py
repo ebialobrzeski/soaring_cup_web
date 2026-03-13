@@ -40,6 +40,7 @@ class User(TimestampMixin, Base):
     verification_code_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     verification_code_expires: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     verification_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default='0')
+    openrouter_key_enc: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     def to_dict(self) -> dict:
         return {
@@ -50,6 +51,7 @@ class User(TimestampMixin, Base):
             'is_active': self.is_active,
             'email_verified': self.email_verified,
             'preferred_language': self.preferred_language,
+            'has_openrouter_key': bool(self.openrouter_key_enc),
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'last_login_at': self.last_login_at.isoformat() if self.last_login_at else None,
         }

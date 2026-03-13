@@ -106,7 +106,7 @@
             <sl-tab slot="nav" panel="task"{% if view_mode %} active{% endif %}><i class="fas fa-route"></i> <span data-i18n="nav.task_planner">Task Planner</span></sl-tab>
             <sl-tab slot="nav" panel="ai-planner"><i class="fas fa-brain"></i> <span data-i18n="nav.ai_planner">AI Planner</span></sl-tab>
             <sl-tab slot="nav" panel="admin" id="admin-tab" style="display:none"><i class="fas fa-shield-alt"></i> <span data-i18n="nav.admin">Admin</span></sl-tab>
-            <sl-tab slot="nav" panel="my-content" id="my-content-tab" style="display:none"><i class="fas fa-folder-open"></i> <span data-i18n="nav.my_content">My Content</span></sl-tab>
+            <sl-tab slot="nav" panel="my-content" id="my-content-tab" style="display:none"><i class="fas fa-user"></i> <span data-i18n="nav.my_content">My Account</span></sl-tab>
 
             <!-- Map View -->
             <sl-tab-panel name="map">
@@ -467,11 +467,11 @@
             <sl-tab-panel name="ai-planner">
                 <div class="ai-planner-panel">
                     <div id="ai-planner-upgrade-cta" class="ai-upgrade-cta" hidden>
-                        <i class="fas fa-lock fa-3x" style="color:var(--sl-color-neutral-400); margin-bottom:16px;"></i>
-                        <h2>AI Planner &mdash; Premium Feature</h2>
-                        <p>Upgrade to premium to access intelligent task planning with weather analysis, glider polar integration, and AI-powered route optimization.</p>
-                        <sl-button variant="primary" size="medium" id="ai-upgrade-btn">
-                            <i class="fas fa-star" slot="prefix"></i> Upgrade to Premium
+                        <i class="fas fa-key fa-3x" style="color:var(--sl-color-warning-500); margin-bottom:16px;"></i>
+                        <h2 data-i18n="aip.key_missing_title">API Key Required</h2>
+                        <p data-i18n="aip.byok_required">An OpenRouter API key is required to use the AI Planner. Add one in Settings.</p>
+                        <sl-button variant="primary" size="medium" id="ai-goto-settings-btn">
+                            <i class="fas fa-cog" slot="prefix"></i> <span data-i18n="mc.settings">Settings</span>
                         </sl-button>
                     </div>
                     <div id="ai-planner-premium-content" class="ai-planner-content" hidden>
@@ -575,6 +575,11 @@
                                         </div>
                                     </sl-details>
 
+                                    <!-- Custom Instructions -->
+                                    <sl-textarea id="aip-custom-instructions" label="Custom instructions" data-i18n-label="aip.custom_instructions" placeholder="e.g. Avoid flying over large forests, prefer turnpoints near landing options…" data-i18n-placeholder="aip.custom_instructions_placeholder" size="small" rows="2" resize="auto" maxlength="500">
+                                        <i class="fas fa-comment-dots" slot="prefix"></i>
+                                    </sl-textarea>
+
                                     <!-- Generate Button -->
                                     <sl-button id="aip-generate-btn" variant="primary" size="medium" style="width:100%; margin-top:8px;">
                                         <i class="fas fa-magic" slot="prefix"></i> <span data-i18n="aip.generate_btn">Generate Task</span>
@@ -665,8 +670,8 @@
                     </div>
                     <div id="ai-planner-anon-cta" class="ai-upgrade-cta">
                         <i class="fas fa-brain fa-3x" style="color:var(--sl-color-primary-500); margin-bottom:16px;"></i>
-                        <h2>AI Planner &mdash; Premium Feature</h2>
-                        <p>Log in or sign up for a premium account to access intelligent task planning with weather analysis, glider polar integration, and AI-powered route optimization.</p>
+                        <h2>AI Task Planner</h2>
+                        <p>Log in and add your OpenRouter API key to access intelligent task planning with weather analysis, glider polar integration, and AI-powered route optimization.</p>
                         <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
                             <sl-button variant="primary" id="ai-login-btn">
                                 <i class="fas fa-sign-in-alt" slot="prefix"></i> Log in
@@ -877,7 +882,7 @@
             <sl-tab-panel name="my-content">
                 <div class="admin-panel">
                     <div class="admin-header">
-                        <h2><i class="fas fa-folder-open"></i> <span data-i18n="nav.my_content">My Content</span></h2>
+                        <h2><i class="fas fa-user"></i> <span data-i18n="nav.my_content">My Account</span></h2>
                     </div>
 
                     <sl-tab-group id="my-content-tabs">
@@ -975,6 +980,43 @@
                                     </sl-select>
                                     <small style="color:var(--text-secondary); margin-top:6px; display:block;" data-i18n="mc.language_pref_desc">Applied automatically when you log in.</small>
                                 </div>
+
+                                <sl-divider></sl-divider>
+
+                                <!-- OpenRouter API Key (BYOK) -->
+                                <div class="form-group" style="margin-bottom:20px;">
+                                    <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
+                                        <label style="font-weight:500;" data-i18n="settings.openrouter_label">OpenRouter API Key</label>
+                                        <sl-tooltip id="mc-apikey-tooltip" hoist>
+                                            <div slot="content" style="max-width:340px; line-height:1.5;" data-i18n-html="settings.apikey_instructions">
+                                                <strong>How to get your API key:</strong><br>
+                                                1. Go to <a href="https://openrouter.ai" target="_blank" rel="noopener" style="color:var(--sl-color-primary-400);">openrouter.ai</a> and create a free account<br>
+                                                2. Go to <strong>Settings → API Keys</strong><br>
+                                                3. Click <strong>Create Key</strong> and name it (e.g. <em>gliding_forecast</em>)<br>
+                                                4. Copy the key (starts with <code>sk-or-v1-</code>) and paste it here<br>
+                                                5. Add credits — $5 is enough for hundreds of flight plans<br><br>
+                                                <em>Your key is encrypted and stored securely. You control your own AI costs directly through OpenRouter.</em>
+                                            </div>
+                                            <sl-icon-button name="info-circle" style="font-size:1.1rem; color:var(--sl-color-primary-600); vertical-align:middle;" label="How to get an API key"></sl-icon-button>
+                                        </sl-tooltip>
+                                    </div>
+                                    <div id="mc-apikey-status" style="margin-bottom:8px; font-size:.875rem; color:var(--text-secondary);"></div>
+                                    <sl-input id="mc-apikey-input" type="password" size="medium" style="width:100%;" placeholder="sk-or-v1-..." password-toggle>
+                                        <i class="fas fa-key" slot="prefix"></i>
+                                    </sl-input>
+                                    <small style="color:var(--text-secondary); margin-top:6px; display:block;" data-i18n="settings.openrouter_help">Provide your own OpenRouter key to use AI Planner. Get one free at openrouter.ai → Settings → API Keys.</small>
+                                    <div style="display:flex; gap:8px; margin-top:10px;">
+                                        <sl-button id="mc-apikey-save-btn" variant="primary" size="small">
+                                            <i class="fas fa-save" slot="prefix"></i> <span data-i18n="settings.save_key_btn">Save Key</span>
+                                        </sl-button>
+                                        <sl-button id="mc-apikey-remove-btn" variant="danger" size="small" outline>
+                                            <i class="fas fa-trash" slot="prefix"></i> <span data-i18n="settings.remove_key_btn">Remove Key</span>
+                                        </sl-button>
+                                    </div>
+                                </div>
+
+                                <sl-divider></sl-divider>
+
                                 <sl-button id="mc-settings-save-btn" variant="primary" size="small">
                                     <i class="fas fa-save" slot="prefix"></i> <span data-i18n="mc.save_settings">Save Settings</span>
                                 </sl-button>

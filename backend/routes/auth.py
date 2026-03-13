@@ -188,6 +188,70 @@ def update_language():
         return jsonify({'error': 'Update failed.'}), 500
 
 
+# ── API key management (BYOK) ────────────────────────────────────────────────
+
+import re as _re
+
+_OPENROUTER_KEY_RE = _re.compile(r'^sk-or-v1-[a-f0-9]{64}$')
+
+
+@auth_bp.route('/me/api-key', methods=['GET'])
+@login_required
+def get_api_key():
+    """Return masked status of the user's OpenRouter API key."""
+    has_key = bool(current_user.openrouter_key_enc)
+    last4 = ''
+    if has_key:
+        try:
+            from backend.utils.crypto import decrypt_value
+            plain = decrypt_value(current_user.openrouter_key_enc)
+            last4 = plain[-4:]
+        except Exception:
+            pass
+    return jsonify({'has_key': has_key, 'last4': last4})
+
+
+@auth_bp.route('/me/api-key', methods=['PUT'])
+@login_required
+def set_api_key():
+    """Store the user's OpenRouter API key (encrypted at rest)."""
+    data = request.get_json(silent=True) or {}
+    key = (data.get('api_key') or '').strip()
+
+    if not key:
+        return jsonify({'error': 'api_key is required.'}), 400
+    if not _OPENROUTER_KEY_RE.match(key):
+        return jsonify({'error': 'Invalid OpenRouter API key format. It should start with sk-or-v1- followed by 64 hex characters.'}), 400
+
+    from backend.utils.crypto import encrypt_value
+    db = get_db()
+    try:
+        current_user.openrouter_key_enc = encrypt_value(key)
+        db.flush()
+        db.commit()
+        return jsonify({'success': True, 'has_key': True, 'last4': key[-4:]})
+    except Exception:
+        db.rollback()
+        logger.exception('Failed to save API key')
+        return jsonify({'error': 'Failed to save API key.'}), 500
+
+
+@auth_bp.route('/me/api-key', methods=['DELETE'])
+@login_required
+def delete_api_key():
+    """Remove the user's stored OpenRouter API key."""
+    db = get_db()
+    try:
+        current_user.openrouter_key_enc = None
+        db.flush()
+        db.commit()
+        return jsonify({'success': True, 'has_key': False})
+    except Exception:
+        db.rollback()
+        logger.exception('Failed to remove API key')
+        return jsonify({'error': 'Failed to remove API key.'}), 500
+
+
 @auth_bp.route('/admin/set-tier', methods=['POST'])
 @admin_required
 def set_tier():

@@ -67,6 +67,14 @@ class MyContentPanel {
         document.getElementById('mc-settings-save-btn')?.addEventListener('click', () => {
             this._saveLanguagePreference();
         });
+
+        // API key management
+        document.getElementById('mc-apikey-save-btn')?.addEventListener('click', () => {
+            this._saveApiKey();
+        });
+        document.getElementById('mc-apikey-remove-btn')?.addEventListener('click', () => {
+            this._removeApiKey();
+        });
     }
 
     // ── Settings ─────────────────────────────────────────────────────────────
@@ -98,6 +106,9 @@ class MyContentPanel {
             .then(r => r.json())
             .then(data => { if (data.success) populate(data.languages); })
             .catch(() => {});
+
+        // Load API key status
+        this._loadApiKeyStatus();
     }
 
     async _saveLanguagePreference() {
@@ -131,6 +142,86 @@ class MyContentPanel {
         } catch {
             window.app?.showStatus('Network error saving language preference.', 'error');
         }
+    }
+
+    // ── API Key Management ──────────────────────────────────────────────────
+
+    async _loadApiKeyStatus() {
+        const statusEl = document.getElementById('mc-apikey-status');
+        const removeBtn = document.getElementById('mc-apikey-remove-btn');
+        if (!statusEl) return;
+        try {
+            const resp = await fetch('/auth/me/api-key');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (data.has_key) {
+                const mask = window.i18n?.t('settings.key_mask', 'Key configured (ending …{0})').replace('{0}', data.last4) ||
+                             `Key configured (ending …${data.last4})`;
+                statusEl.innerHTML = `<i class="fas fa-check-circle" style="color:var(--sl-color-success-600);"></i> ${this._escapeHtml(mask)}`;
+                if (removeBtn) removeBtn.style.display = '';
+            } else {
+                statusEl.innerHTML = `<i class="fas fa-info-circle" style="color:var(--sl-color-neutral-500);"></i> ${window.i18n?.t('settings.key_status_unset', 'No API key configured.') || 'No API key configured.'}`;
+                if (removeBtn) removeBtn.style.display = 'none';
+            }
+        } catch { /* ignore */ }
+    }
+
+    async _saveApiKey() {
+        const input = document.getElementById('mc-apikey-input');
+        if (!input) return;
+        const key = (input.value || '').trim();
+        if (!key) {
+            window.app?.showStatus(window.i18n?.t('settings.key_invalid', 'Invalid API key format.') || 'Invalid API key format.', 'error');
+            return;
+        }
+        try {
+            const resp = await fetch('/auth/me/api-key', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ api_key: key }),
+            });
+            const data = await resp.json();
+            if (!resp.ok) {
+                window.app?.showStatus(data.error || 'Failed to save API key.', 'error');
+                return;
+            }
+            input.value = '';
+            if (window.authManager?.currentUser) {
+                window.authManager.currentUser.has_openrouter_key = true;
+            }
+            window.app?.showStatus(window.i18n?.t('settings.key_saved', 'API key saved successfully.') || 'API key saved successfully.', 'success');
+            this._loadApiKeyStatus();
+            // Refresh AI planner panel visibility
+            window.app?._updateAiPlannerPanel();
+        } catch {
+            window.app?.showStatus('Network error saving API key.', 'error');
+        }
+    }
+
+    async _removeApiKey() {
+        try {
+            const resp = await fetch('/auth/me/api-key', { method: 'DELETE' });
+            const data = await resp.json();
+            if (!resp.ok) {
+                window.app?.showStatus(data.error || 'Failed to remove API key.', 'error');
+                return;
+            }
+            if (window.authManager?.currentUser) {
+                window.authManager.currentUser.has_openrouter_key = false;
+            }
+            window.app?.showStatus(window.i18n?.t('settings.key_removed', 'API key removed.') || 'API key removed.', 'success');
+            this._loadApiKeyStatus();
+            // Refresh AI planner panel visibility
+            window.app?._updateAiPlannerPanel();
+        } catch {
+            window.app?.showStatus('Network error removing API key.', 'error');
+        }
+    }
+
+    _escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 
     // ── Waypoint Files ──────────────────────────────────────────────────────

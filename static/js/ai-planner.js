@@ -552,6 +552,7 @@ class AiPlanner {
             safety_profile: document.getElementById('aip-safety')?.value || 'standard',
             soaring_mode: document.getElementById('aip-soaring-mode')?.value || 'thermal',
             language: window.i18n?.currentLang || 'en',
+            custom_instructions: val('aip-custom-instructions') || null,
             constraints: {
                 exclude_transponder: checked('aip-exclude-transponder'),
                 exclude_flight_plan: checked('aip-exclude-flightplan'),

@@ -37,11 +37,12 @@ from backend.task_planner.airspace import (
 )
 from backend.task_planner.optimizer import (
     estimate_flight_time,
+    geocode_place,
     optimize_task,
 )
 from backend.task_planner.terrain import check_task_terrain
 from backend.task_planner.weather import fetch_weather_grid
-from backend.utils.auth_decorators import login_required, premium_required
+from backend.utils.auth_decorators import login_required
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +140,7 @@ def openaip_airspace():
 # ── Glider list ──────────────────────────────────────────────────────────────
 
 @ai_planner_bp.route("/api/planner/gliders", methods=["GET"])
-@premium_required
+@login_required
 def list_gliders():
     """Return available glider polars for the dropdown.
     
@@ -176,7 +177,7 @@ def list_gliders():
 
 
 @ai_planner_bp.route("/api/planner/gliders/<glider_id>/polar", methods=["GET"])
-@premium_required
+@login_required
 def get_glider_polar(glider_id: str):
     """Return full polar data for a glider (for chart rendering)."""
     db = get_db()
@@ -356,7 +357,7 @@ def delete_glider(glider_id: str):
 # ── Airport search ───────────────────────────────────────────────────────────
 
 @ai_planner_bp.route("/api/planner/airports", methods=["GET"])
-@premium_required
+@login_required
 def search_airports():
     """Search airports by name or ICAO code.
 
@@ -402,7 +403,7 @@ def search_airports():
 # ── Airspace check ───────────────────────────────────────────────────────────
 
 @ai_planner_bp.route("/api/planner/airspace", methods=["POST"])
-@premium_required
+@login_required
 def check_airspace():
     """Check airspace conflicts for a set of task points."""
     data = request.get_json(silent=True) or {}
@@ -456,7 +457,7 @@ def check_airspace():
 # ── Generate task proposal ───────────────────────────────────────────────────
 
 @ai_planner_bp.route("/api/planner/generate", methods=["POST"])
-@premium_required
+@login_required
 def generate_task():
     """Generate an AI task proposal based on user inputs.
 
@@ -473,6 +474,15 @@ def generate_task():
       - constraints: dict (airspace toggles)
     """
     data = request.get_json(silent=True) or {}
+
+    # Resolve user's OpenRouter API key (BYOK)
+    user_api_key = ""
+    if current_user.openrouter_key_enc:
+        try:
+            from backend.utils.crypto import decrypt_value
+            user_api_key = decrypt_value(current_user.openrouter_key_enc)
+        except Exception:
+            logger.warning("Failed to decrypt user API key for user %s", current_user.id)
 
     # Validate required fields
     required = ["takeoff_airport", "target_distance_km", "flight_date"]
@@ -526,6 +536,7 @@ def generate_task():
         "safety_profile": safety_profile,
         "soaring_mode": soaring_mode,
         "constraints": constraints,
+        "custom_instructions": (data.get("custom_instructions") or "")[:500],
     }
 
     # User's preferred UI language (en, pl, de, cs)
@@ -677,6 +688,14 @@ def generate_task():
 
         max_duration = float(data.get("max_duration_hours", 4.0))
 
+        # ── 3a. Parse preferred waypoints from custom instructions ────────
+        preferred_waypoints: list[tuple[float, float]] = []
+        custom_instr = inputs_snapshot.get("custom_instructions", "")
+        if custom_instr:
+            preferred_waypoints = _parse_waypoints_from_instructions(
+                custom_instr, takeoff["lat"], takeoff["lon"], target_km,
+            )
+
         top_candidates = optimize_task(
             takeoff["lat"], takeoff["lon"],
             target_km,
@@ -689,6 +708,7 @@ def generate_task():
             timed_cells=timed_cells,
             takeoff_hour=takeoff_hour,
             max_duration_hours=max_duration,
+            preferred_waypoints=preferred_waypoints or None,
         )
         g._aip_external_calls["candidates"] = len(top_candidates)
 
@@ -731,6 +751,8 @@ def generate_task():
             airspace_info=airspace_info,
             terrain_info=terrain_info,
             language=language,
+            api_key_override=user_api_key,
+            custom_instructions=inputs_snapshot.get("custom_instructions", ""),
         )
         g._aip_external_calls["ai_model"] = ai_result.get("ai_model", "none")
         # Per-provider AI API stats
@@ -802,6 +824,68 @@ def generate_task():
 
 
 # ── Helper functions ─────────────────────────────────────────────────────────
+
+def _parse_waypoints_from_instructions(
+    instructions: str,
+    bias_lat: float,
+    bias_lon: float,
+    radius_km: float,
+) -> list[tuple[float, float]]:
+    """Extract place names from custom instructions and geocode them.
+
+    Uses simple heuristic: look for capitalized words/phrases that might be
+    place names (after common prepositions like 'through', 'via', 'over',
+    'near', 'around', 'przez', 'przez', 'koło', 'nad', 'über', 'přes').
+    Then geocode each candidate with Nominatim biased to the task area.
+    """
+    import re as _re
+
+    # Patterns to extract place names after directional prepositions
+    # Supports EN, PL, DE, CS
+    prep_pattern = _re.compile(
+        r'(?:through|via|over|near|around|towards?|past|include|'
+        r'przez|koło|nad|obok|w kierunku|blisko|'
+        r'über|bei|nahe|Richtung|vorbei|'
+        r'přes|kolem|poblíž|směrem)\s+'
+        r'([A-ZŻŹĆĄŚĘŁÓŃÁÉÍÓÚŮÝČĎĚŇŘŠŤŽ][a-zżźćąśęłóńáéíóúůýčďěňřšťž]+(?:\s+[A-ZŻŹĆĄŚĘŁÓŃÁÉÍÓÚŮÝČĎĚŇŘŠŤŽ][a-zżźćąśęłóńáéíóúůýčďěňřšťž]+)*)',
+        _re.UNICODE,
+    )
+
+    candidates = prep_pattern.findall(instructions)
+
+    # Also check for standalone capitalized words that are 4+ chars and not common words
+    _common = {
+        'Avoid', 'Prefer', 'Include', 'Make', 'Route', 'Flight', 'Task',
+        'Thermal', 'Ridge', 'Wave', 'Landing', 'Takeoff', 'Airport',
+        'Unikaj', 'Preferuj', 'Trasa', 'Lot', 'Lotnisko',
+        'Vermeiden', 'Flug', 'Flugplatz', 'Strecke',
+        'Vyhněte', 'Přistání', 'Letiště',
+    }
+
+    if not candidates:
+        # Fallback: try all capitalized multi-word phrases
+        fallback = _re.findall(
+            r'\b([A-ZŻŹĆĄŚĘŁÓŃÁÉÍÓÚŮÝČĎĚŇŘŠŤŽ][a-zżźćąśęłóńáéíóúůýčďěňřšťž]{3,}(?:\s+[A-ZŻŹĆĄŚĘŁÓŃÁÉÍÓÚŮÝČĎĚŇŘŠŤŽ][a-zżźćąśęłóńáéíóúůýčďěňřšťž]+)*)\b',
+            instructions,
+            _re.UNICODE,
+        )
+        candidates = [w for w in fallback if w not in _common]
+
+    logger.info("Parsed %d place-name candidates from custom instructions: %s",
+                len(candidates), candidates)
+
+    waypoints: list[tuple[float, float]] = []
+    seen: set[str] = set()
+    for name in candidates[:5]:  # limit to avoid excessive API calls
+        if name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        coords = geocode_place(name, bias_lat, bias_lon, radius_km=max(radius_km, 200))
+        if coords:
+            waypoints.append(coords)
+
+    return waypoints
+
 
 def _resolve_airport(db: Session, identifier: str) -> dict | None:
     """Resolve an airport by ID, ICAO code, or name."""
@@ -898,7 +982,7 @@ def _update_session(
 # ── Planner sessions (persistence) ───────────────────────────────────────────
 
 @ai_planner_bp.route("/api/planner/sessions", methods=["GET"])
-@premium_required
+@login_required
 def list_sessions():
     """Return the current user's planner sessions (most recent first)."""
     db = get_db()
@@ -926,7 +1010,7 @@ def list_sessions():
 
 
 @ai_planner_bp.route("/api/planner/sessions/<session_id>", methods=["GET"])
-@premium_required
+@login_required
 def get_session(session_id: str):
     """Load a full planner session (inputs + fetched data + result)."""
     db = get_db()
@@ -956,7 +1040,7 @@ def get_session(session_id: str):
 
 
 @ai_planner_bp.route("/api/planner/sessions/<session_id>", methods=["PATCH"])
-@premium_required
+@login_required
 def update_session(session_id: str):
     """Rename a planner session."""
     data = request.get_json(silent=True) or {}
@@ -980,7 +1064,7 @@ def update_session(session_id: str):
 
 
 @ai_planner_bp.route("/api/planner/sessions/<session_id>", methods=["DELETE"])
-@premium_required
+@login_required
 def delete_session(session_id: str):
     """Delete a planner session."""
     db = get_db()

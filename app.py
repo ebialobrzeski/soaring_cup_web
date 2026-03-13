@@ -4,6 +4,7 @@ Task planning and waypoint file editor for soaring and gliding.
 """
 
 import os
+import sys
 import json
 import uuid
 import io
@@ -85,7 +86,14 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Configure logging
+
 os.makedirs('logs', exist_ok=True)
+
+# Force UTF-8 on console streams so Polish/Czech/German chars don't crash logging
+if sys.stdout.encoding and sys.stdout.encoding.lower() not in ('utf-8', 'utf8'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr.encoding and sys.stderr.encoding.lower() not in ('utf-8', 'utf8'):
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # Always configure a file handler so backend module logs are captured
 file_handler = RotatingFileHandler(

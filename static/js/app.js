@@ -1160,8 +1160,14 @@ class SoaringCupEditor {
         const am = window.authManager;
         if (!am || !am.isAuthenticated) {
             anon.hidden = false; upgrade.hidden = true; content.hidden = true;
-        } else if (!am.isPremium()) {
+        } else if (!am.currentUser.has_openrouter_key) {
+            // Logged in but no API key configured
             anon.hidden = true; upgrade.hidden = false; content.hidden = true;
+            // Wire up the "go to settings" button
+            document.getElementById('ai-goto-settings-btn')?.addEventListener('click', () => {
+                document.getElementById('main-tabs')?.show?.('my-content');
+                setTimeout(() => document.getElementById('my-content-tabs')?.show?.('mc-settings'), 100);
+            }, { once: true });
         } else {
             anon.hidden = true; upgrade.hidden = true; content.hidden = false;
             if (window.aiPlanner) window.aiPlanner.init();
