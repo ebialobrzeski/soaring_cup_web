@@ -46,8 +46,8 @@ class AiPlanner {
         this._setupAirportAutocomplete('aip-takeoff', 'aip-takeoff-ac');
         this._setupAirportAutocomplete('aip-destination', 'aip-destination-ac');
 
-        // Session history menu
-        this._setupSessionMenu();
+        // Session history drawer
+        this._setupHistoryDrawer();
         this._loadSessions();
 
         // Restore last session on refresh
@@ -882,50 +882,105 @@ class AiPlanner {
 
     // ── Session persistence ─────────────────────────────────────────────────
 
-    _setupSessionMenu() {
-        const menu = document.getElementById('aip-session-menu');
-        if (!menu) return;
+    _setupHistoryDrawer() {
+        // Open drawer when history button clicked
+        document.getElementById('aip-history-btn')
+            ?.addEventListener('click', () => {
+                const drawer = document.getElementById('aip-history-drawer');
+                if (drawer) {
+                    this._loadSessions();
+                    drawer.show();
+                }
+            });
 
-        menu.addEventListener('sl-select', (e) => {
-            const item = e.detail?.item;
-            if (!item) return;
-            const action = item.dataset.action;
-            const sid = item.dataset.sessionId;
-
-            if (action === 'delete' && sid) {
-                this._deleteSession(sid);
-            } else if (sid) {
-                this._loadSession(sid);
-            }
-        });
+        // Delegate clicks inside the history list
+        document.getElementById('aip-history-list')
+            ?.addEventListener('click', (e) => {
+                const card = e.target.closest('.aip-history-card');
+                const deleteBtn = e.target.closest('.aip-history-delete');
+                if (deleteBtn) {
+                    e.stopPropagation();
+                    this._deleteSession(deleteBtn.dataset.sessionId);
+                    return;
+                }
+                if (card?.dataset.sessionId) {
+                    this._loadSession(card.dataset.sessionId);
+                    document.getElementById('aip-history-drawer')?.hide();
+                }
+            });
     }
 
     async _loadSessions() {
-        const menu = document.getElementById('aip-session-menu');
-        if (!menu) return;
+        const listEl = document.getElementById('aip-history-list');
+        if (!listEl) return;
 
         try {
             const resp = await fetch('/api/planner/sessions');
             if (!resp.ok) return;
             const sessions = await resp.json();
 
+            const countEl = document.getElementById('aip-history-count');
+            if (countEl) countEl.textContent = `${sessions.length} flight plan${sessions.length !== 1 ? 's' : ''}`;
+
             if (!sessions.length) {
-                menu.innerHTML = '<sl-menu-item disabled>No saved sessions</sl-menu-item>';
+                listEl.innerHTML = `<div class="aip-history-empty">
+                    <i class="fas fa-history fa-2x" style="opacity:.3; margin-bottom:8px;"></i>
+                    <p>No saved flight plans yet.</p>
+                </div>`;
                 return;
             }
 
-            menu.innerHTML = sessions.map(s => {
-                const d = s.updated_at ? new Date(s.updated_at).toLocaleDateString() : '';
-                const active = s.id === this._currentSessionId ? ' style="font-weight:600;"' : '';
-                return `<sl-menu-item data-session-id="${this._escapeAttr(s.id)}"${active}>
-                    <span>${this._escapeHtml(s.name || 'Untitled')}</span>
-                    <small style="opacity:.6;margin-left:8px;">${d}</small>
-                </sl-menu-item>`;
-            }).join('') +
-                '<sl-divider></sl-divider>' +
-                '<sl-menu-item data-action="delete" data-session-id="__current__" ' +
-                'style="color:var(--sl-color-danger-500);">' +
-                '<i class="fas fa-trash-alt" slot="prefix"></i> Delete current session</sl-menu-item>';
+            listEl.innerHTML = sessions.map(s => {
+                const isActive = s.id === this._currentSessionId;
+                const date = s.updated_at ? new Date(s.updated_at) : null;
+                const dateStr = date ? date.toLocaleDateString() : '';
+                const timeStr = date ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                const flightDate = s.inputs?.flight_date || '';
+
+                // Status icon
+                let statusIcon;
+                if (s.status === 'completed') statusIcon = '<i class="fas fa-check-circle" style="color:var(--sl-color-success-500);"></i>';
+                else if (s.status === 'error') statusIcon = '<i class="fas fa-exclamation-circle" style="color:var(--sl-color-danger-500);"></i>';
+                else statusIcon = '<i class="fas fa-spinner fa-spin" style="color:var(--sl-color-warning-500);"></i>';
+
+                // Score badge
+                let scoreBadge = '';
+                if (s.score != null) {
+                    let cls = 'aip-score-poor';
+                    if (s.score >= 81) cls = 'aip-score-excellent';
+                    else if (s.score >= 61) cls = 'aip-score-good';
+                    else if (s.score >= 41) cls = 'aip-score-marginal';
+                    scoreBadge = `<span class="aip-score-badge ${cls}" style="font-size:.75rem;padding:2px 6px;">${s.score}</span>`;
+                }
+
+                // Description
+                const desc = s.route_description || s.name || 'Untitled';
+                const airport = s.inputs?.takeoff_airport || '';
+                const distStr = s.distance_km ? `${s.distance_km.toFixed(0)} km` : '';
+                const errorSnippet = s.status === 'error' && s.error_message
+                    ? `<div class="aip-history-error">${this._escapeHtml(s.error_message)}</div>` : '';
+
+                return `<div class="aip-history-card${isActive ? ' active' : ''}" data-session-id="${this._escapeAttr(s.id)}">
+                    <div class="aip-history-card-header">
+                        ${statusIcon}
+                        <span class="aip-history-card-title">${this._escapeHtml(desc)}</span>
+                        ${scoreBadge}
+                    </div>
+                    <div class="aip-history-card-meta">
+                        ${airport ? `<span><i class="fas fa-plane-departure"></i> ${this._escapeHtml(airport)}</span>` : ''}
+                        ${distStr ? `<span><i class="fas fa-route"></i> ${distStr}</span>` : ''}
+                        ${flightDate ? `<span><i class="fas fa-calendar-day"></i> ${flightDate}</span>` : ''}
+                    </div>
+                    <div class="aip-history-card-footer">
+                        <small>${dateStr} ${timeStr}</small>
+                        ${s.ai_model && s.ai_model !== 'none' ? `<small style="opacity:.5;">${this._escapeHtml(s.ai_model)}</small>` : ''}
+                        <button class="aip-history-delete" data-session-id="${this._escapeAttr(s.id)}" title="Delete">
+                            <i class="fas fa-trash-alt"></i>
+                        </button>
+                    </div>
+                    ${errorSnippet}
+                </div>`;
+            }).join('');
         } catch { /* silent */ }
     }
 
@@ -986,14 +1041,13 @@ class AiPlanner {
     }
 
     async _deleteSession(sessionId) {
-        const id = sessionId === '__current__' ? this._currentSessionId : sessionId;
-        if (!id) return;
+        if (!sessionId) return;
 
         try {
-            const resp = await fetch(`/api/planner/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            const resp = await fetch(`/api/planner/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
             if (!resp.ok) return;
 
-            if (id === this._currentSessionId) {
+            if (sessionId === this._currentSessionId) {
                 this._currentSessionId = null;
                 try { localStorage.removeItem('aip_last_session'); } catch {}
                 this._setViewState('idle');
@@ -1040,8 +1094,8 @@ class AiPlanner {
         task.turnpoints.forEach((pt, i) => {
             let name;
             if (i === 0) name = inputs.takeoff_airport || 'Start';
-            else if (i === task.turnpoints.length - 1 && task.turnpoints.length > 2) name = inputs.destination_airport || inputs.takeoff_airport || 'Finish';
-            else name = `TP${i}`;
+            else if (i === task.turnpoints.length - 1) name = inputs.destination_airport || inputs.takeoff_airport || 'Finish';
+            else name = task.turnpoint_names?.[i] || `TP${i}`;
 
             const wp = {
                 name,

@@ -13,6 +13,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'), ov
 # Flask
 SECRET_KEY: str = os.environ.get('SECRET_KEY', 'CHANGE-ME-IN-PRODUCTION')
 BASE_URL: str = os.environ.get('BASE_URL', '')
+FLASK_DEBUG: bool = os.environ.get('FLASK_DEBUG', '0').lower() in ('1', 'true', 'yes')
 
 # Database
 DATABASE_URL: str = os.environ.get('DATABASE_URL', '')

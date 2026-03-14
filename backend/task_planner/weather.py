@@ -237,11 +237,30 @@ def _store_cached_cells(
     forecast_date: date,
     model_run: str,
     source: str,
+    timed_cells: dict[str, list[WeatherCell]] | None = None,
 ) -> None:
-    """Store weather cells in cache with 2-hour TTL."""
+    """Store weather cells in cache with 2-hour TTL.
+
+    If *timed_cells* is provided, timed data is embedded inside the cached
+    JSON so that time-bucketed cells can be reconstructed from cache without
+    falling back to duplicating the base cell.
+    """
+    # Build lookup: (lat, lon) -> {tw_name: cell_dict}
+    timed_lookup: dict[tuple[float, float], dict[str, dict]] = {}
+    if timed_cells:
+        for tw_name, tw_list in timed_cells.items():
+            for tc in tw_list:
+                key = (round(tc.lat, 2), round(tc.lon, 2))
+                timed_lookup.setdefault(key, {})[tw_name] = tc.to_dict()
+
     now = datetime.now(timezone.utc)
     expires = now + timedelta(hours=2)
     for cell in cells:
+        payload = cell.to_dict()
+        key = (round(cell.lat, 2), round(cell.lon, 2))
+        tw_data = timed_lookup.get(key)
+        if tw_data:
+            payload["_timed"] = tw_data
         db.execute(
             text("""
                 INSERT INTO weather_cache (lat, lon, forecast_date, model_run, source, data, fetched_at, expires_at)
@@ -250,9 +269,9 @@ def _store_cached_cells(
                 DO UPDATE SET data = :data, fetched_at = :now, expires_at = :exp
             """),
             {
-                "lat": round(cell.lat, 2), "lon": round(cell.lon, 2),
+                "lat": key[0], "lon": key[1],
                 "fd": forecast_date, "mr": model_run, "src": source,
-                "data": json.dumps(cell.to_dict()), "now": now, "exp": expires,
+                "data": json.dumps(payload), "now": now, "exp": expires,
             },
         )
     try:
@@ -354,6 +373,59 @@ def estimate_lapse_rate(
 
 
 # ---------------------------------------------------------------------------
+# Flyability assessment
+# ---------------------------------------------------------------------------
+
+def assess_flyability(cells: list[Any]) -> dict:
+    """Evaluate whether thermal soaring conditions are flyable.
+
+    Checks midday cells (peak conditions). Returns a dict with:
+      flyable: bool
+      reasons: list[str]   – human-readable issues detected
+    """
+    if not cells:
+        return {"flyable": False, "reasons": ["No weather data available"]}
+
+    # Prefer midday cells; fall back to all cells
+    midday = [c for c in cells if getattr(c, "time_window", None) == "midday"]
+    check = midday or cells
+
+    avg_thermal = _safe_avg([getattr(c, "thermal_index", 0) or 0 for c in check])
+    max_thermal = max((getattr(c, "thermal_index", 0) or 0 for c in check), default=0)
+    avg_wind = _safe_avg([getattr(c, "wind_speed_kts", 0) or 0 for c in check])
+    max_wind = max((getattr(c, "wind_speed_kts", 0) or 0 for c in check), default=0)
+    avg_cape = _safe_avg([getattr(c, "cape", 0) or 0 for c in check])
+    avg_cb = _safe_avg([getattr(c, "cloud_base_ft", 0) or 0 for c in check])
+
+    reasons: list[str] = []
+
+    if avg_thermal < 2.0 and max_thermal < 3.0:
+        reasons.append(f"Thermal index very low (avg {avg_thermal:.1f}, max {max_thermal:.1f})")
+    if avg_cape < 100:
+        reasons.append(f"CAPE near zero ({avg_cape:.0f} J/kg) — negligible convection")
+    if avg_wind > 25:
+        reasons.append(f"Wind dangerously strong (avg {avg_wind:.0f} kt)")
+    elif avg_wind > 18:
+        reasons.append(f"Wind very strong (avg {avg_wind:.0f} kt)")
+    if max_wind > 35:
+        reasons.append(f"Wind gusts exceed 35 kt (max {max_wind:.0f} kt)")
+    if avg_cb < 1500:
+        reasons.append(f"Cloud base very low (avg {avg_cb:.0f} ft)")
+
+    # Unflyable = at least 2 serious problems, or thermals + CAPE both dead
+    unflyable = (
+        (avg_thermal < 2.0 and avg_cape < 100)
+        or len(reasons) >= 3
+    )
+
+    return {"flyable": not unflyable, "reasons": reasons}
+
+
+def _safe_avg(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+# ---------------------------------------------------------------------------
 # Open-Meteo bulk fetch
 # ---------------------------------------------------------------------------
 
@@ -379,6 +451,9 @@ _OM_HOURLY_PARAMS = [
 ]
 
 
+_OM_BATCH_SIZE = 50  # Open-Meteo supports comma-separated lat/lon
+
+
 def fetch_open_meteo(
     points: list[tuple[float, float]],
     forecast_date: date,
@@ -386,6 +461,10 @@ def fetch_open_meteo(
     end_hour: int = 21,
 ) -> tuple[list[WeatherCell], dict, dict[str, list[WeatherCell]]]:
     """Fetch general weather data from Open-Meteo for multiple grid points.
+
+    Uses batched multi-point requests (up to 50 lat/lon per call) for
+    efficiency.  A 193-point grid that previously needed 193 sequential
+    HTTP calls now completes in ~4 requests.
 
     Returns (cells, stats, timed_cells) where:
       cells      — averaged cells for the full soaring window (backward compat)
@@ -398,52 +477,60 @@ def fetch_open_meteo(
     date_str = forecast_date.isoformat()
     stats = {"calls": 0, "ok": 0, "errors": 0, "total_time_ms": 0}
 
-    for lat, lon in points:
+    for batch_start in range(0, len(points), _OM_BATCH_SIZE):
+        batch = points[batch_start:batch_start + _OM_BATCH_SIZE]
         t0 = _time.perf_counter()
         stats["calls"] += 1
         try:
             resp = requests.get(
                 OPEN_METEO_URL,
                 params={
-                    "latitude": lat,
-                    "longitude": lon,
+                    "latitude": ",".join(str(p[0]) for p in batch),
+                    "longitude": ",".join(str(p[1]) for p in batch),
                     "hourly": ",".join(_OM_HOURLY_PARAMS),
                     "start_date": date_str,
                     "end_date": date_str,
                     "timezone": "auto",
                 },
-                timeout=15,
+                timeout=30,
             )
             resp.raise_for_status()
             elapsed = int((_time.perf_counter() - t0) * 1000)
             stats["total_time_ms"] += elapsed
-            data = resp.json()
-            hourly = data.get("hourly", {})
-            times = hourly.get("time", [])
+            payload = resp.json()
 
-            # Full-window average (backward compatible)
-            cell = _aggregate_open_meteo_hourly(lat, lon, hourly, times, start_hour, end_hour)
-            if cell:
-                cells.append(cell)
-                stats["ok"] += 1
+            # Single-point response is a plain object; multi-point is a list
+            results = payload if isinstance(payload, list) else [payload]
 
-            # Time-bucketed cells from the same response
-            for tw_name, (tw_start, tw_end) in TIME_WINDOWS.items():
-                tw_cell = _aggregate_open_meteo_hourly(
-                    lat, lon, hourly, times, tw_start, tw_end,
-                    time_window=tw_name,
+            for idx, data in enumerate(results):
+                lat, lon = batch[idx] if idx < len(batch) else (0, 0)
+                hourly = data.get("hourly", {})
+                times = hourly.get("time", [])
+
+                cell = _aggregate_open_meteo_hourly(
+                    lat, lon, hourly, times, start_hour, end_hour,
                 )
-                if tw_cell:
-                    timed_cells[tw_name].append(tw_cell)
+                if cell:
+                    cells.append(cell)
+                    stats["ok"] += 1
+
+                for tw_name, (tw_start, tw_end) in TIME_WINDOWS.items():
+                    tw_cell = _aggregate_open_meteo_hourly(
+                        lat, lon, hourly, times, tw_start, tw_end,
+                        time_window=tw_name,
+                    )
+                    if tw_cell:
+                        timed_cells[tw_name].append(tw_cell)
 
         except Exception:
             elapsed = int((_time.perf_counter() - t0) * 1000)
             stats["total_time_ms"] += elapsed
             stats["errors"] += 1
-            logger.warning("Open-Meteo fetch failed for (%.2f, %.2f)", lat, lon, exc_info=True)
+            logger.warning("Open-Meteo batch fetch failed (%d pts)",
+                           len(batch), exc_info=True)
 
-    logger.info("Open-Meteo: fetched %d/%d grid points (%dms), timed cells: %s",
-                len(cells), len(points), stats["total_time_ms"],
+    logger.info("Open-Meteo: fetched %d/%d grid points in %d calls (%dms), timed cells: %s",
+                len(cells), len(points), stats["calls"], stats["total_time_ms"],
                 {tw: len(v) for tw, v in timed_cells.items()})
     return cells, stats, timed_cells
 
@@ -894,13 +981,20 @@ def fetch_weather_grid(
 
     Returns (cells, metadata) where metadata includes IMGW supplement, etc.
     """
-    # 1. Generate mesh
+    # 1. Generate mesh — use coarser spacing for large tasks to cap API calls
     radius_km = target_distance_km * 0.6 + 20  # task area radius with buffer
+    spacing = 25.0
+    if target_distance_km > 250:
+        spacing = 45.0
+    elif target_distance_km > 150:
+        spacing = 35.0
     mesh = generate_mesh(
         takeoff_lat, takeoff_lon, radius_km,
         dest_lat=dest_lat, dest_lon=dest_lon,
+        spacing_km=spacing,
     )
-    logger.info("Weather mesh: %d grid points (radius %.0fkm)", len(mesh), radius_km)
+    logger.info("Weather mesh: %d grid points (radius %.0fkm, spacing %.0fkm)",
+                len(mesh), radius_km, spacing)
 
     # 2. Check cache
     model_run = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:00Z")
@@ -916,25 +1010,37 @@ def fetch_weather_grid(
     # 3. Open-Meteo bulk fetch for uncached
     fresh_cells, om_stats, timed_cells = fetch_open_meteo(uncached, forecast_date, start_hour, end_hour)
 
-    # Store fresh cells in cache
+    # Store fresh cells in cache (including timed data)
     if fresh_cells:
         try:
-            _store_cached_cells(db, fresh_cells, forecast_date, model_run, "open-meteo")
+            _store_cached_cells(db, fresh_cells, forecast_date, model_run, "open-meteo",
+                                timed_cells=timed_cells)
         except Exception:
             logger.warning("Cache store failed", exc_info=True)
 
     # Combine cached + fresh
     all_cells: list[WeatherCell] = []
     for p, data in cached.items():
-        all_cells.append(WeatherCell(**data))
+        base = {k: v for k, v in data.items() if k != "_timed"}
+        all_cells.append(WeatherCell(**base))
     all_cells.extend(fresh_cells)
 
-    # Also add cached cells into timed buckets (they have no time_window, use as midday proxy)
+    # Reconstruct timed cells from cache (use embedded _timed data if available)
     for p, data in cached.items():
-        for tw_name in TIME_WINDOWS:
-            c = WeatherCell(**data)
-            c.time_window = tw_name
-            timed_cells.setdefault(tw_name, []).append(c)
+        embedded = data.get("_timed")
+        if embedded:
+            # Cache has proper time-bucketed data
+            for tw_name, tw_data in embedded.items():
+                c = WeatherCell(**tw_data)
+                c.time_window = tw_name
+                timed_cells.setdefault(tw_name, []).append(c)
+        else:
+            # Legacy cache entry without timed data — duplicate base cell
+            base = {k: v for k, v in data.items() if k != "_timed"}
+            for tw_name in TIME_WINDOWS:
+                c = WeatherCell(**base)
+                c.time_window = tw_name
+                timed_cells.setdefault(tw_name, []).append(c)
 
     # 4. Coarse filter
     passing, failed = filter_cells(all_cells, forecast_date=forecast_date)

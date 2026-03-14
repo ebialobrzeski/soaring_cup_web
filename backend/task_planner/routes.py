@@ -678,11 +678,14 @@ def generate_task():
 
         # Build weather summary with time-windowed cells for richer LLM context
         timed_cells = weather_meta.get("timed_cells")
-        weather_summary = [c.summary_line() for c in weather_cells]
-        if timed_cells:
+        if timed_cells and any(timed_cells.get(tw) for tw in ("morning", "midday", "afternoon")):
+            # Use only time-windowed cells to avoid duplicating base cells
+            weather_summary = []
             for tw_name in ("morning", "midday", "afternoon"):
                 for c in timed_cells.get(tw_name, []):
                     weather_summary.append(c.summary_line())
+        else:
+            weather_summary = [c.summary_line() for c in weather_cells]
 
         # Format waypoints for the AI prompt
         waypoint_dicts = []
@@ -696,6 +699,10 @@ def generate_task():
                 "bearing_deg": wp.bearing_deg,
                 "icao": wp.icao,
                 "summary_line": wp.summary_line(),
+                "thermal_index": wp.thermal_index,
+                "wind_speed_kts": wp.wind_speed_kts,
+                "wind_dir": wp.wind_dir,
+                "cloud_base_ft": wp.cloud_base_ft,
             })
 
         # Format airspace zones for the AI prompt
@@ -725,6 +732,13 @@ def generate_task():
             logger.warning("Terrain check failed", exc_info=True)
 
         # ── 5. AI route design ────────────────────────────────────────────
+        # Pass weather cells for flyability assessment (removed before serialization)
+        all_weather_cells = weather_cells[:]
+        if timed_cells:
+            for tw_cells in timed_cells.values():
+                all_weather_cells.extend(tw_cells)
+        inputs_snapshot["_weather_cells"] = all_weather_cells
+
         ai_result = generate_task_routes(
             waypoint_dicts, weather_summary, inputs_snapshot,
             airspace_zones=airspace_zone_dicts,
@@ -733,6 +747,8 @@ def generate_task():
             api_key_override=user_api_key,
             custom_instructions=inputs_snapshot.get("custom_instructions", ""),
         )
+        # Remove non-serializable weather cells from snapshot before JSON response
+        inputs_snapshot.pop("_weather_cells", None)
         g._aip_external_calls["ai_model"] = ai_result.get("ai_model", "none")
         # Per-provider AI API stats
         ai_stats = ai_result.get("ai_stats", {})
@@ -771,7 +787,22 @@ def generate_task():
                 "session_id": session_id,
             }), 200
 
-        # ── 7. Build response ─────────────────────────────────────────────
+        # ── 7. Re-run terrain check with the actual validated route ──────
+        route_points = [(tp["lat"], tp["lon"]) for tp in validated["turnpoints"]]
+        if len(route_points) >= 2:
+            try:
+                terrain_result = check_task_terrain(
+                    route_points,
+                    expected_altitude_m=int((weather_cells[0].bl_height or 1500) * 0.8),
+                )
+                terrain_info = {
+                    "safe": terrain_result["safe"],
+                    "max_terrain_m": terrain_result["max_terrain_m"],
+                }
+            except Exception:
+                logger.warning("Terrain re-check failed for validated route", exc_info=True)
+
+        # ── 8. Build response ─────────────────────────────────────────────
         # Flight time estimate
         flight_est = estimate_flight_time(
             validated["total_distance_km"],
@@ -923,11 +954,21 @@ def _update_session(
 @ai_planner_bp.route("/api/planner/sessions", methods=["GET"])
 @login_required
 def list_sessions():
-    """Return the current user's planner sessions (most recent first)."""
+    """Return the current user's planner sessions (most recent first).
+
+    Includes summary fields extracted from the result JSONB so the frontend
+    can render rich history cards without fetching each session individually.
+    """
     db = get_db()
     rows = db.execute(
         text("""
-            SELECT id, name, status, inputs, created_at, updated_at
+            SELECT id, name, status, inputs, created_at, updated_at,
+                   result->'score'                          AS score,
+                   result->'task'->>'total_distance_km'     AS distance_km,
+                   result->'task'->>'description'           AS route_description,
+                   result->>'ai_model'                      AS ai_model,
+                   result->>'estimated_duration_hours'       AS est_hours,
+                   error_message
             FROM planner_sessions
             WHERE user_id = :uid
             ORDER BY updated_at DESC
@@ -943,6 +984,12 @@ def list_sessions():
             "inputs": r[3],
             "created_at": r[4].isoformat() if r[4] else None,
             "updated_at": r[5].isoformat() if r[5] else None,
+            "score": r[6],
+            "distance_km": float(r[7]) if r[7] else None,
+            "route_description": r[8],
+            "ai_model": r[9],
+            "est_hours": float(r[10]) if r[10] else None,
+            "error_message": (r[11] or "")[:100] if r[11] else None,
         }
         for r in rows
     ])

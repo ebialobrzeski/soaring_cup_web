@@ -29,6 +29,7 @@ from backend.config import (
     GEMINI_API_KEY,
     GROQ_API_KEY,
 )
+from backend.task_planner.debug_logger import save_ai_exchange
 
 logger = logging.getLogger(__name__)
 
@@ -428,6 +429,7 @@ def _build_task_prompt(
     terrain_info: dict | None = None,
     language: str = "en",
     custom_instructions: str = "",
+    flyability_warning: list[str] | None = None,
 ) -> str:
     """Build the prompt for AI route design and narrative.
 
@@ -444,7 +446,8 @@ def _build_task_prompt(
         f"TASK REQUEST: {task_inputs.get('target_distance_km', 100)}km "
         f"{task_inputs.get('soaring_mode', 'thermal')} flight",
         f"TAKEOFF: {takeoff_name} ({takeoff_lat:.4f}N, {takeoff_lon:.4f}E)",
-        f"DATE: {task_inputs.get('flight_date', 'N/A')}",
+        f"TODAY: {date.today().isoformat()}",
+        f"FLIGHT DATE: {task_inputs.get('flight_date', 'N/A')}",
         f"SAFETY PROFILE: {safety}",
         f"RESPONSE LANGUAGE: {lang_name}",
     ]
@@ -476,6 +479,17 @@ def _build_task_prompt(
         lines.append("SAFETY GUIDANCE: Aggressive — pilot accepts higher risk. "
                       "Out-and-return and longer routes are acceptable.")
 
+    # Flyability warning — injected when conditions are clearly unflyable
+    if flyability_warning:
+        lines.append("")
+        lines.append("⚠⚠⚠ FLYABILITY WARNING ⚠⚠⚠")
+        lines.append("Conditions appear UNFLYABLE for thermal soaring. Issues:")
+        for w in flyability_warning:
+            lines.append(f"  - {w}")
+        lines.append("You MUST include a clear recommendation to NOT FLY in your explanation ")
+        lines.append("and safety_notes. Set score to 0-15 maximum. Still propose the least-bad ")
+        lines.append("route in case the pilot insists, but make the danger abundantly clear.")
+
     # Weather summary with time-window labels
     lines.append("")
     lines.append("═══ WEATHER CONDITIONS ═══")
@@ -484,27 +498,55 @@ def _build_task_prompt(
 
     # Airspace zones — describe each zone so the AI can route around them
     if airspace_zones:
+        # Always keep critical zones; cap minor ones to limit prompt size
+        _CRITICAL_TYPES = {'RESTRICTED', 'PROHIBITED', 'DANGER', 'CTR', 'TMA'}
+        critical = [z for z in airspace_zones if z.get('type') in _CRITICAL_TYPES]
+        minor = [z for z in airspace_zones if z.get('type') not in _CRITICAL_TYPES]
+        MAX_MINOR_ZONES = 20
+        if len(minor) > MAX_MINOR_ZONES:
+            minor = minor[:MAX_MINOR_ZONES]
+        zones_to_show = critical + minor
+
         lines.append("")
-        lines.append(f"═══ AIRSPACE ZONES ({len(airspace_zones)} in task area) ═══")
-        for zone in airspace_zones:
+        lines.append(f"═══ AIRSPACE ZONES ({len(zones_to_show)} in task area) ═══")
+        # Zone types where the AI needs the actual boundary to plan routes
+        _BOUNDARY_TYPES = _CRITICAL_TYPES
+        for zone in zones_to_show:
             z_type = zone.get('type', '?')
             z_class = zone.get('airspace_class', '?')
             z_name = zone.get('name', '?')
             z_lower = zone.get('lower_limit_ft', 0)
             z_upper = zone.get('upper_limit_ft', 0)
-            # Compute zone center from polygon bounds for spatial reference
             poly = zone.get('polygon', [])
-            if poly:
-                center_lat = sum(p[0] for p in poly) / len(poly)
-                center_lon = sum(p[1] for p in poly) / len(poly)
-                loc = f"center≈{center_lat:.2f}N {center_lon:.2f}E"
-            else:
-                loc = "location unknown"
             blocking = "⚠ AVOID" if z_type in ('RESTRICTED', 'PROHIBITED', 'DANGER') else ""
-            lines.append(
-                f"  {z_name} | {z_type} class={z_class} | "
-                f"{z_lower}-{z_upper}ft | {loc} {blocking}"
-            )
+
+            if poly and z_type in _BOUNDARY_TYPES:
+                # RDP simplification — preserves shape, caps at 8 vertices, 2dp precision
+                simplified = _simplify_polygon(poly, max_points=8)
+                boundary = " ".join(f"{p[0]:.2f}N/{p[1]:.2f}E" for p in simplified)
+                lines.append(
+                    f"  {z_name} | {z_type} class={z_class} | "
+                    f"{z_lower}-{z_upper}ft | boundary=[{boundary}] {blocking}"
+                )
+            else:
+                # Minor zones: center + radius is enough
+                if poly:
+                    center_lat = sum(p[0] for p in poly) / len(poly)
+                    center_lon = sum(p[1] for p in poly) / len(poly)
+                    max_dist = 0.0
+                    for p in poly:
+                        dlat = abs(p[0] - center_lat) * 111.0
+                        dlon = abs(p[1] - center_lon) * 111.0 * math.cos(math.radians(center_lat))
+                        d = math.sqrt(dlat ** 2 + dlon ** 2)
+                        if d > max_dist:
+                            max_dist = d
+                    loc = f"center≈{center_lat:.2f}N {center_lon:.2f}E radius≈{max_dist:.0f}km"
+                else:
+                    loc = "location unknown"
+                lines.append(
+                    f"  {z_name} | {z_type} class={z_class} | "
+                    f"{z_lower}-{z_upper}ft | {loc} {blocking}"
+                )
 
     if terrain_info:
         lines.append("")
@@ -564,12 +606,23 @@ def generate_task_routes(
     Returns dict with routes[], weather_summary, safety_notes, etc.
     Falls back to error result if all AI providers fail.
     """
+    # Assess flyability from raw weather cells passed via task_inputs
+    flyability_warning: list[str] | None = None
+    raw_weather_cells = task_inputs.get("_weather_cells")
+    if raw_weather_cells:
+        from backend.task_planner.weather import assess_flyability
+        assessment = assess_flyability(raw_weather_cells)
+        if not assessment["flyable"]:
+            flyability_warning = assessment["reasons"]
+            logger.warning("Conditions assessed as UNFLYABLE: %s", flyability_warning)
+
     prompt = _build_task_prompt(
         waypoints, weather_summary, task_inputs,
         airspace_zones=airspace_zones,
         terrain_info=terrain_info,
         language=language,
         custom_instructions=custom_instructions,
+        flyability_warning=flyability_warning,
     )
     logger.info(
         "generate_task_routes: %d waypoints, %d weather cells, target=%skm, safety=%s, prompt=%d chars",
@@ -582,8 +635,20 @@ def generate_task_routes(
 
     raw_text, model, ai_stats = _call_ai_with_fallback(prompt, _SYSTEM_PROMPT, api_key_override=api_key_override)
 
+    parsed = safe_json_parse(raw_text) if raw_text else None
+
+    # Save full exchange to disk for analysis (dev mode only)
+    save_ai_exchange(
+        system_prompt=_SYSTEM_PROMPT,
+        user_prompt=prompt,
+        raw_response=raw_text,
+        parsed_response=parsed,
+        model_used=model,
+        ai_stats=ai_stats,
+        task_inputs=task_inputs,
+    )
+
     if raw_text:
-        parsed = safe_json_parse(raw_text)
         if parsed and "route" in parsed and isinstance(parsed["route"], dict):
             logger.info(
                 "AI route design OK: model=%s, score=%s",
@@ -609,6 +674,74 @@ def generate_task_routes(
 # ---------------------------------------------------------------------------
 # Route validation helpers
 # ---------------------------------------------------------------------------
+
+def _thermal_label(index: float | None) -> str:
+    """Human-readable thermal quality from numeric index."""
+    if index is None:
+        return "—"
+    if index >= 7:
+        return f"strong ({index:.1f})"
+    if index >= 4:
+        return f"moderate ({index:.1f})"
+    return f"weak ({index:.1f})"
+
+
+def _wind_label(wind_dir: int | None, wind_kts: float | None) -> str:
+    """Human-readable wind string from direction and speed."""
+    if wind_dir is None or wind_kts is None:
+        return "—"
+    return f"{wind_dir}°/{wind_kts:.0f}kt"
+
+
+def _rdp_simplify(
+    points: list[tuple[float, float]], epsilon: float
+) -> list[tuple[float, float]]:
+    """Ramer-Douglas-Peucker polyline simplification (recursive)."""
+    if len(points) <= 2:
+        return points
+    start, end = points[0], points[-1]
+    dx, dy = end[0] - start[0], end[1] - start[1]
+    max_dist, max_idx = 0.0, 0
+    for i in range(1, len(points) - 1):
+        if dx == 0 and dy == 0:
+            dist = math.hypot(points[i][0] - start[0], points[i][1] - start[1])
+        else:
+            t = max(0.0, min(1.0, (
+                (points[i][0] - start[0]) * dx + (points[i][1] - start[1]) * dy
+            ) / (dx * dx + dy * dy)))
+            dist = math.hypot(
+                points[i][0] - (start[0] + t * dx),
+                points[i][1] - (start[1] + t * dy),
+            )
+        if dist > max_dist:
+            max_dist, max_idx = dist, i
+    if max_dist > epsilon:
+        left = _rdp_simplify(points[: max_idx + 1], epsilon)
+        right = _rdp_simplify(points[max_idx:], epsilon)
+        return left[:-1] + right
+    return [start, end]
+
+
+def _simplify_polygon(
+    poly: list[tuple[float, float]], max_points: int = 8
+) -> list[tuple[float, float]]:
+    """Simplify an airspace boundary polygon for inclusion in the AI prompt.
+
+    Uses Ramer-Douglas-Peucker with ~2km tolerance (0.02°) to discard
+    redundant collinear vertices while preserving the actual shape of narrow
+    or irregular zones.  Falls back to uniform sampling if the result still
+    exceeds *max_points*.
+    """
+    if len(poly) <= 4:
+        return poly
+    # RDP pass — 0.02° ≈ 2 km, acceptable for AI route planning
+    simplified = _rdp_simplify(poly, epsilon=0.02)
+    if len(simplified) <= max_points:
+        return simplified
+    # Uniform fallback to hard cap
+    step = len(simplified) / max_points
+    return [simplified[int(i * step) % len(simplified)] for i in range(max_points)]
+
 
 def validate_ai_route(
     route: dict,
@@ -652,6 +785,10 @@ def validate_ai_route(
                 "lon": best_wp["lon"],
                 "type": best_wp.get("type", "town"),
                 "icao": best_wp.get("icao"),
+                "thermal_index": best_wp.get("thermal_index"),
+                "wind_speed_kts": best_wp.get("wind_speed_kts"),
+                "wind_dir": best_wp.get("wind_dir"),
+                "cloud_base_ft": best_wp.get("cloud_base_ft"),
             })
             if best_dist > 0.5:
                 logger.info("Snapped AI turnpoint '%s' → '%s' (%.1fkm offset)",
@@ -669,11 +806,45 @@ def validate_ai_route(
     points = [(takeoff_lat, takeoff_lon)] + [(tp["lat"], tp["lon"]) for tp in snapped_tps] + [(takeoff_lat, takeoff_lon)]
     names = ["Takeoff"] + [tp["name"] for tp in snapped_tps] + ["Takeoff"]
 
+    # Build weather lookup from snapped turnpoints (keyed by name)
+    wp_weather: dict[str, dict] = {}
+    for tp in snapped_tps:
+        label = _thermal_label(tp.get("thermal_index"))
+        wind = _wind_label(tp.get("wind_dir"), tp.get("wind_speed_kts"))
+        wp_weather[tp["name"]] = {
+            "thermal_index": tp.get("thermal_index"),
+            "thermal_quality": label,
+            "wind_speed_kts": tp.get("wind_speed_kts"),
+            "wind_dir": tp.get("wind_dir"),
+            "wind_exposure": wind,
+            "cloud_base_ft": tp.get("cloud_base_ft"),
+        }
+
+    # Add weather for the takeoff point from the nearest available waypoint
+    best_to_dist = float("inf")
+    best_to_wp = None
+    for wp in available_waypoints:
+        d = _haversine(takeoff_lat, takeoff_lon, wp["lat"], wp["lon"])
+        if d < best_to_dist:
+            best_to_dist = d
+            best_to_wp = wp
+    if best_to_wp:
+        wp_weather["Takeoff"] = {
+            "thermal_index": best_to_wp.get("thermal_index"),
+            "thermal_quality": _thermal_label(best_to_wp.get("thermal_index")),
+            "wind_speed_kts": best_to_wp.get("wind_speed_kts"),
+            "wind_dir": best_to_wp.get("wind_dir"),
+            "wind_exposure": _wind_label(best_to_wp.get("wind_dir"), best_to_wp.get("wind_speed_kts")),
+            "cloud_base_ft": best_to_wp.get("cloud_base_ft"),
+        }
+
     total_distance = 0.0
     for i in range(len(points) - 1):
         dist = _haversine(points[i][0], points[i][1], points[i + 1][0], points[i + 1][1])
         brg = _bearing(points[i][0], points[i][1], points[i + 1][0], points[i + 1][1])
         total_distance += dist
+        # Attach weather from the destination waypoint of this leg
+        dest_wx = wp_weather.get(names[i + 1], {})
         legs.append({
             "from": names[i],
             "to": names[i + 1],
@@ -683,6 +854,9 @@ def validate_ai_route(
             "to_lon": points[i + 1][1],
             "distance_km": round(dist, 1),
             "bearing": round(brg, 0),
+            "thermal_quality": dest_wx.get("thermal_quality", "—"),
+            "wind_exposure": dest_wx.get("wind_exposure", "—"),
+            "cloud_base_ft": dest_wx.get("cloud_base_ft"),
         })
 
     return {
@@ -690,8 +864,17 @@ def validate_ai_route(
         "score": route.get("score", 50),
         "explanation": route.get("explanation", ""),
         "total_distance_km": round(total_distance, 1),
-        "turnpoints": [{"lat": tp["lat"], "lon": tp["lon"]} for tp in snapped_tps],
-        "turnpoint_names": [tp["name"] for tp in snapped_tps],
+        # Full route: takeoff + intermediate TPs + destination (=takeoff for closed circuits)
+        "turnpoints": (
+            [{"lat": takeoff_lat, "lon": takeoff_lon}]
+            + [{"lat": tp["lat"], "lon": tp["lon"]} for tp in snapped_tps]
+            + [{"lat": takeoff_lat, "lon": takeoff_lon}]
+        ),
+        "turnpoint_names": (
+            ["Takeoff"]
+            + [tp["name"] for tp in snapped_tps]
+            + ["Takeoff"]
+        ),
         "legs": legs,
     }
 

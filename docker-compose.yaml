@@ -28,6 +28,7 @@ services:
       - ./logs:/app/logs
     environment:
       - FLASK_ENV=production
+      - FLASK_DEBUG=0
       - SECRET_KEY=${SECRET_KEY:-change_this_secret_key_in_production}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-glideplan}:${POSTGRES_PASSWORD:-changeme_secure_password}@postgres_gliding:5432/${POSTGRES_DB:-gliding_forecast}
       - WINDY_API_KEY=${WINDY_API_KEY:-}

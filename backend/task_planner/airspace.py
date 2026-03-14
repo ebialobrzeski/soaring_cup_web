@@ -226,6 +226,23 @@ def _parse_openaip_airspace(item: dict) -> Optional[AirspaceZone]:
         }
         zone_type = type_map.get(atype, "OTHER")
 
+        # OpenAIP sometimes misclassifies national zones.
+        # Infer the correct type from standard ICAO naming prefixes
+        # when the data source returns a generic type (FIR/UIR/OTHER).
+        if zone_type in ("FIR", "UIR", "OTHER"):
+            upper_name = name.upper()
+            # EPRxx = Polish restricted, EPTRxx = TRA (restricted)
+            # EPTSxx = TSA (segregated, treat as restricted)
+            # EPDxx = danger, EPPxx = prohibited
+            # UMRxx = Belarusian restricted, UMDxx = danger, UMPxx = prohibited
+            # EY-R = Lithuanian restricted, EY-D = danger
+            if any(upper_name.startswith(p) for p in ("EPTR", "EPTS", "EPR", "UMR", "EY-R")):
+                zone_type = "RESTRICTED"
+            elif any(upper_name.startswith(p) for p in ("EPD", "UMD", "EY-D")):
+                zone_type = "DANGER"
+            elif any(upper_name.startswith(p) for p in ("EPP", "UMP")):
+                zone_type = "PROHIBITED"
+
         # Parse geometry
         geometry = item.get("geometry", {})
         coords_raw = geometry.get("coordinates", [[]])
@@ -685,10 +702,20 @@ def _zone_to_dict(zone: AirspaceZone) -> dict:
 
 def _zone_from_dict(d: dict) -> AirspaceZone:
     """Deserialize AirspaceZone from a dict."""
+    zone_type = d["type"]
+    # Apply name-based inference also on cached data (cache may predate the fix)
+    if zone_type in ("FIR", "UIR", "OTHER"):
+        upper_name = d["name"].upper()
+        if any(upper_name.startswith(p) for p in ("EPTR", "EPTS", "EPR", "UMR", "EY-R")):
+            zone_type = "RESTRICTED"
+        elif any(upper_name.startswith(p) for p in ("EPD", "UMD", "EY-D")):
+            zone_type = "DANGER"
+        elif any(upper_name.startswith(p) for p in ("EPP", "UMP")):
+            zone_type = "PROHIBITED"
     return AirspaceZone(
         name=d["name"],
         airspace_class=d["airspace_class"],
-        type=d["type"],
+        type=zone_type,
         lower_limit_ft=d["lower_limit_ft"],
         upper_limit_ft=d["upper_limit_ft"],
         polygon=[tuple(p) for p in d["polygon"]],

@@ -45,6 +45,7 @@ class Waypoint:
         """Compact text line for the AI prompt."""
         parts = [
             f"{self.name} ({self.type})",
+            f"{self.lat:.4f}N/{self.lon:.4f}E",
             f"{self.distance_km:.0f}km",
             f"{self.bearing_deg:.0f}°",
         ]
@@ -131,6 +132,56 @@ def fetch_nearby_airports(
 
     waypoints.sort(key=lambda w: w.distance_km)
     logger.info("Found %d airports within %.0fkm of takeoff", len(waypoints), max_range_km)
+    return waypoints
+
+
+# ---------------------------------------------------------------------------
+# Supplement: fetch airfields / landing strips from OpenAIP live API
+# ---------------------------------------------------------------------------
+
+def _fetch_openaip_airfields(
+    takeoff_lat: float,
+    takeoff_lon: float,
+    max_range_km: float,
+) -> list[Waypoint]:
+    """Fetch additional airfields / outlandings from OpenAIP that may not be
+    in the local airports database (grass strips, glider sites, etc.)."""
+    from backend.services.waypoint_generation_service import query_openaip_aviation
+
+    lat_delta = max_range_km / 111.0
+    lon_delta = max_range_km / (111.0 * math.cos(math.radians(takeoff_lat)))
+
+    try:
+        legacy_wps = query_openaip_aviation(
+            min_lat=takeoff_lat - lat_delta,
+            max_lat=takeoff_lat + lat_delta,
+            min_lon=takeoff_lon - lon_delta,
+            max_lon=takeoff_lon + lon_delta,
+            types=["airports", "outlandings"],
+        )
+    except Exception:
+        logger.warning("OpenAIP airfield fetch failed", exc_info=True)
+        return []
+
+    waypoints: list[Waypoint] = []
+    for lwp in legacy_wps:
+        lat, lon = lwp.latitude, lwp.longitude
+        dist = _haversine(takeoff_lat, takeoff_lon, lat, lon)
+        if dist > max_range_km or dist < 3.0:
+            continue
+        waypoints.append(Waypoint(
+            name=lwp.name,
+            lat=lat,
+            lon=lon,
+            type="airport",
+            distance_km=round(dist, 1),
+            bearing_deg=round(_bearing(takeoff_lat, takeoff_lon, lat, lon), 0),
+            icao=lwp.description if lwp.description else None,
+            has_runway=getattr(lwp, "style", 1) in (2, 4, 5),
+        ))
+
+    waypoints.sort(key=lambda w: w.distance_km)
+    logger.info("OpenAIP returned %d airfields within %.0fkm", len(waypoints), max_range_km)
     return waypoints
 
 
@@ -239,6 +290,61 @@ def enrich_waypoints_with_weather(
 
 
 # ---------------------------------------------------------------------------
+# Fallback: generate waypoints via live APIs when none exist locally
+# ---------------------------------------------------------------------------
+
+def _generate_waypoints_fallback(
+    db: Session,
+    takeoff_lat: float,
+    takeoff_lon: float,
+    max_range_km: float,
+) -> list[Waypoint]:
+    """Call the waypoint generation service to fetch airports + towns from live APIs.
+
+    Converts the legacy Waypoint objects returned by the generation service
+    into the task-planner Waypoint format.
+    """
+    from backend.services.waypoint_generation_service import generate_waypoints
+
+    # Build a bounding box from the takeoff point and max range
+    lat_delta = max_range_km / 111.0
+    lon_delta = max_range_km / (111.0 * math.cos(math.radians(takeoff_lat)))
+
+    result = generate_waypoints(
+        db,
+        min_lat=takeoff_lat - lat_delta,
+        max_lat=takeoff_lat + lat_delta,
+        min_lon=takeoff_lon - lon_delta,
+        max_lon=takeoff_lon + lon_delta,
+        types=["airports", "cities", "towns"],
+    )
+
+    legacy_wps = result.get("waypoints", [])
+    converted: list[Waypoint] = []
+    for lwp in legacy_wps:
+        lat = lwp.latitude
+        lon = lwp.longitude
+        dist = _haversine(takeoff_lat, takeoff_lon, lat, lon)
+        if dist > max_range_km:
+            continue
+        # Infer type from CUP style: 2=grass, 4=gliding, 5=solid → airport
+        wp_type = "airport" if getattr(lwp, "style", 1) in (2, 4, 5) else "town"
+        converted.append(Waypoint(
+            name=lwp.name,
+            lat=lat,
+            lon=lon,
+            type=wp_type,
+            distance_km=round(dist, 1),
+            bearing_deg=round(_bearing(takeoff_lat, takeoff_lon, lat, lon), 0),
+            icao=lwp.description if wp_type == "airport" and lwp.description else None,
+        ))
+
+    converted.sort(key=lambda w: w.distance_km)
+    logger.info("Fallback generated %d waypoints from live APIs", len(converted))
+    return converted
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -267,10 +373,23 @@ def discover_waypoints(
     # Ensure minimum range for short tasks
     max_range = max(max_range, 25.0)
 
-    # For very long tasks, include villages too (more waypoint options)
-    min_place = "village" if target_distance_km > 200 else "town"
+    # Never include villages — they flood the prompt with thousands of entries.
+    # Cities and towns provide sufficient turnpoint density for any task distance.
+    min_place = "town"
 
     airports = fetch_nearby_airports(db, takeoff_lat, takeoff_lon, max_range)
+
+    # Supplement with OpenAIP airfields (grass strips, glider sites, outlandings)
+    openaip_airports = _fetch_openaip_airfields(takeoff_lat, takeoff_lon, max_range)
+    # Merge: keep OpenAIP airfields that aren't duplicates of DB airports (within 2km)
+    for oap in openaip_airports:
+        duplicate = any(
+            _haversine(oap.lat, oap.lon, ap.lat, ap.lon) < 2.0
+            for ap in airports
+        )
+        if not duplicate:
+            airports.append(oap)
+
     towns = fetch_nearby_towns(takeoff_lat, takeoff_lon, max_range, min_place_type=min_place)
 
     # Deduplicate: if a town is within 3km of an airport, keep only the airport
@@ -285,6 +404,16 @@ def discover_waypoints(
 
     all_waypoints = airports + deduped_towns
     all_waypoints.sort(key=lambda w: w.distance_km)
+
+    # Fallback: if no waypoints found via DB/Overpass, generate from live APIs
+    if not all_waypoints:
+        logger.warning(
+            "No waypoints found within %.0fkm of takeoff — falling back to live generation",
+            max_range,
+        )
+        all_waypoints = _generate_waypoints_fallback(
+            db, takeoff_lat, takeoff_lon, max_range,
+        )
 
     enrich_waypoints_with_weather(all_waypoints, weather_cells)
 

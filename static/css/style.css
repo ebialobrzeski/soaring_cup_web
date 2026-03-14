@@ -2955,6 +2955,123 @@ html.sl-theme-dark .aip-score-poor      { background: rgba(239, 68, 68, 0.15);  
 .aip-alt-dist { color: var(--text-secondary); }
 .aip-alt-score { font-weight: 600; min-width: 50px; text-align: right; }
 
+/* ── AI Planner: Session History Drawer ── */
+
+.aip-history-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding: 0 2px;
+}
+
+.aip-history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+}
+
+.aip-history-empty {
+    text-align: center;
+    padding: 40px 16px;
+    color: var(--text-secondary);
+}
+
+.aip-history-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--surface);
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+}
+
+.aip-history-card:hover {
+    border-color: var(--sl-color-primary-400);
+    background: var(--surface-hover, var(--surface));
+}
+
+.aip-history-card.active {
+    border-color: var(--sl-color-primary-500);
+    background: var(--sl-color-primary-50, rgba(59, 130, 246, 0.05));
+}
+
+html.sl-theme-dark .aip-history-card.active {
+    background: rgba(59, 130, 246, 0.1);
+}
+
+.aip-history-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.aip-history-card-title {
+    flex: 1;
+    font-weight: 600;
+    font-size: 0.9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+}
+
+.aip-history-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.aip-history-card-meta i {
+    margin-right: 3px;
+    font-size: 0.7rem;
+}
+
+.aip-history-card-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.aip-history-card-footer small:first-child {
+    flex: 1;
+}
+
+.aip-history-delete {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-secondary);
+    opacity: 0;
+    transition: opacity .15s, color .15s;
+    padding: 2px 4px;
+    font-size: 0.8rem;
+}
+
+.aip-history-card:hover .aip-history-delete {
+    opacity: 1;
+}
+
+.aip-history-delete:hover {
+    color: var(--sl-color-danger-500);
+}
+
+.aip-history-error {
+    margin-top: 4px;
+    font-size: 0.75rem;
+    color: var(--sl-color-danger-500);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .aip-layout {
