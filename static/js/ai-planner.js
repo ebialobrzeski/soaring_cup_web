@@ -881,9 +881,16 @@ class AiPlanner {
             const icon = isBlocking
                 ? '<i class="fas fa-ban" style="color:var(--sl-color-danger-500)"></i>'
                 : '<i class="fas fa-info-circle" style="color:var(--sl-color-warning-500)"></i>';
-            const leg = (c.leg_index != null) ? ` leg ${c.leg_index + 1}` : '';
+            // Support both deduplicated leg_indices[] and legacy single leg_index
+            let legStr = '';
+            if (Array.isArray(c.leg_indices) && c.leg_indices.length) {
+                const labels = c.leg_indices.sort((a, b) => a - b).map(i => `leg ${i + 1}`);
+                legStr = ' ' + labels.join(', ');
+            } else if (c.leg_index != null) {
+                legStr = ` leg ${c.leg_index + 1}`;
+            }
             const cls = c.airspace_class && c.airspace_class !== '?' ? ` class ${this._escapeHtml(c.airspace_class)}` : '';
-            html += `<li>${icon} <strong>${this._escapeHtml(c.zone_name)}</strong> (${this._escapeHtml(c.zone_type)}${cls}${leg}) — ${this._escapeHtml(c.suggestion)}</li>`;
+            html += `<li>${icon} <strong>${this._escapeHtml(c.zone_name)}</strong> (${this._escapeHtml(c.zone_type)}${cls}${legStr}) — ${this._escapeHtml(c.suggestion)}</li>`;
         });
         html += '</ul>';
         el.innerHTML = html;

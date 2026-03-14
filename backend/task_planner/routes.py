@@ -853,14 +853,50 @@ def generate_task():
 
         # AI-reported conflicts are the primary source of conflict details.
         # The AI reasoned about each leg using the full zone list it received.
-        # Enrich each AI conflict with metadata from the pre-fetched zone objects.
+        # Enrich each AI conflict with metadata from the pre-fetched zone objects,
+        # then filter to actionable zones only and deduplicate by zone name.
         ai_conflicts_raw = ai_result.get("airspace_conflicts") or []
         zone_meta_by_name = {z.name: z for z in pre_zones}
+
+        # Zone types that are actual flight hazards requiring avoidance action.
+        # All others (FIR, ADIZ, AIRWAY, ATZ, FIS, HTZ, TIZ, RMZ, …) are
+        # informational and must not be surfaced to the pilot as "conflicts".
+        _ACTIONABLE_TYPES = {"RESTRICTED", "PROHIBITED", "DANGER", "CTR", "TMA"}
+
+        def _is_actionable(ac: dict) -> bool:
+            """Return True only for zones the pilot needs to actively avoid/plan for."""
+            z_type = (ac.get("zone_type") or "").upper()
+            if z_type not in _ACTIONABLE_TYPES:
+                return False
+            # Also filter out anything the AI marked as "accept" with advisory severity
+            # that isn't a hard block — only blocking/CTR entries are worth showing.
+            severity = (ac.get("severity") or "").lower()
+            if z_type in ("CTR", "TMA") and severity not in ("blocking", "advisory"):
+                return False
+            return True
+
+        def _deduplicate_conflicts(raw: list[dict]) -> list[dict]:
+            """Merge per-leg entries for the same zone into one entry with leg_indices."""
+            seen: dict[str, dict] = {}
+            for entry in raw:
+                key = entry["zone_name"]
+                if key not in seen:
+                    seen[key] = dict(entry)
+                    seen[key]["leg_indices"] = [entry["leg_index"]]
+                else:
+                    if entry["leg_index"] not in seen[key]["leg_indices"]:
+                        seen[key]["leg_indices"].append(entry["leg_index"])
+                    # Escalate severity if any leg is blocking
+                    if entry.get("severity") == "blocking":
+                        seen[key]["severity"] = "blocking"
+            return list(seen.values())
 
         if ai_conflicts_raw:
             conflict_list: list[dict] = []
             for ac in ai_conflicts_raw:
                 if not isinstance(ac, dict):
+                    continue
+                if not _is_actionable(ac):
                     continue
                 z_name = ac.get("zone_name", "")
                 z_meta = zone_meta_by_name.get(z_name)
@@ -875,13 +911,14 @@ def generate_task():
                     "requires_flight_plan": getattr(z_meta, "requires_flight_plan", False) if z_meta else False,
                     "is_notam": False,
                 })
+            conflict_list = _deduplicate_conflicts(conflict_list)
             is_ai_blocking = any(c.get("severity") == "blocking" for c in conflict_list)
             airspace_info["conflict_list"] = conflict_list
             airspace_info["conflicts"] = len(conflict_list)
             airspace_info["has_blocking"] = airspace_info.get("has_blocking", False) or is_ai_blocking
             logger.info(
-                "AI airspace conflicts: %d (programmatic geometric check had %d)",
-                len(conflict_list), len(prog_conflicts),
+                "AI airspace conflicts after filter+dedup: %d (raw: %d, programmatic: %d)",
+                len(conflict_list), len(ai_conflicts_raw), len(prog_conflicts),
             )
         else:
             # AI returned no conflicts — fall back to programmatic geometric results

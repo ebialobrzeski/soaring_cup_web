@@ -342,11 +342,17 @@ AIRSPACE SAFETY (CRITICAL):
 
 AIRSPACE CONFLICT DETECTION (REQUIRED):
 - After finalising your route, inspect each leg against the AIRSPACE ZONES list.
-- For every RESTRICTED, PROHIBITED, DANGER zone or CTR that your route passes through
-  or comes within 2 km of, add an entry to the airspace_conflicts array.
+- Only report zones of type: RESTRICTED, PROHIBITED, DANGER, CTR, TMA.
+- Do NOT report FIR, ADIZ, AIRWAY, ATZ, FIS, HTZ, TIZ, RMZ — these are informational
+  and do not require avoidance. They must NOT appear in airspace_conflicts.
+- ALTITUDE CHECK: Before flagging a conflict, check the zone's vertical limits.
+  Gliders typically cruise at 1000–5000ft AGL (thermal soaring ceiling ≈ 6000ft).
+  - If the zone's lower_limit_ft > 6500ft: glider stays below → NO conflict. Skip it.
+  - If the zone's upper_limit_ft < 500ft: glider stays above → NO conflict. Skip it.
+  - Otherwise: assume the glider altitude overlaps the zone → report the conflict.
 - leg_index is 0-based: 0 = Takeoff→TP1, 1 = TP1→TP2, last leg = last TP→Takeoff.
 - For a conflict-free route return an empty array: "airspace_conflicts": []
-- severity: "blocking" for RESTRICTED/PROHIBITED/DANGER, "advisory" for CTR/TMA/RMZ.
+- severity: "blocking" for RESTRICTED/PROHIBITED/DANGER, "advisory" for CTR/TMA.
 
 ROUTE DESIGN PRINCIPLES:
 - All routes must be CLOSED CIRCUITS returning to the takeoff airport.
