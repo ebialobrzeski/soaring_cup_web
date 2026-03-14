@@ -56,7 +56,12 @@ class AdminPanel {
         // Load usage data when sub-tab shown
         document.getElementById('admin-tabs')?.addEventListener('sl-tab-show', (e) => {
             if (e.detail.name === 'admin-usage') this._loadUsage();
+            if (e.detail.name === 'admin-airports') this._loadAirportStats();
         });
+
+        // Airport import
+        document.getElementById('airport-import-btn')?.addEventListener('click', () => this._startAirportImport());
+        document.getElementById('airport-stats-btn')?.addEventListener('click', () => this._loadAirportStats());
     }
 
     // ── Users ────────────────────────────────────────────────────────────────
@@ -481,6 +486,106 @@ class AdminPanel {
         const d = document.createElement('div');
         d.textContent = s;
         return d.innerHTML;
+    }
+
+    // ── Airports ──────────────────────────────────────────────────────────────
+
+    async _loadAirportStats() {
+        const statsWrap = document.getElementById('airport-stats-wrap');
+        const tbody = document.getElementById('airport-stats-tbody');
+        if (!statsWrap || !tbody) return;
+        statsWrap.style.display = 'none';
+        try {
+            const resp = await fetch('/api/admin/airports/stats');
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.error || 'Failed to load airport stats.'); return; }
+            document.getElementById('airport-total-count').textContent = data.total.toLocaleString();
+            document.getElementById('airport-country-count').textContent = data.by_country.length;
+            tbody.innerHTML = data.by_country.map(r =>
+                `<tr><td>${this._esc(r.country)}</td><td>${r.count.toLocaleString()}</td></tr>`
+            ).join('');
+            statsWrap.style.display = '';
+        } catch {
+            alert('Failed to load airport stats.');
+        }
+    }
+
+    async _startAirportImport() {
+        const btn = document.getElementById('airport-import-btn');
+        const progressWrap = document.getElementById('airport-import-progress');
+        const statusEl = document.getElementById('airport-import-status');
+        const bar = document.getElementById('airport-import-bar');
+        const resultEl = document.getElementById('airport-import-result');
+
+        const countriesRaw = document.getElementById('airport-import-countries')?.value?.trim() || '';
+        const countries = countriesRaw ? countriesRaw.toUpperCase().split(/[\s,]+/).filter(Boolean) : null;
+
+        if (!confirm(countries
+            ? `Import airports for: ${countries.join(', ')}?`
+            : 'Import airports for ALL countries? This will take several minutes.')) return;
+
+        btn.disabled = true;
+        progressWrap.style.display = '';
+        resultEl.style.display = 'none';
+        statusEl.textContent = 'Starting…';
+        bar.value = 0;
+
+        try {
+            const resp = await fetch('/api/admin/airports/import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(countries ? { countries } : {}),
+            });
+
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.error || `HTTP ${resp.status}`);
+            }
+
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = '';
+            let totalUpserted = 0;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buf += decoder.decode(value, { stream: true });
+                const lines = buf.split('\n');
+                buf = lines.pop();
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    try {
+                        const msg = JSON.parse(line);
+                        if (msg.type === 'progress') {
+                            const pct = Math.round((msg.index / msg.total) * 100);
+                            bar.value = pct;
+                            statusEl.textContent = `[${msg.index}/${msg.total}] ${msg.country}: ${msg.upserted} airports — total: ${msg.total_upserted.toLocaleString()}`;
+                            totalUpserted = msg.total_upserted;
+                        } else if (msg.type === 'error') {
+                            throw new Error(msg.message);
+                        } else if (msg.type === 'done') {
+                            totalUpserted = msg.total_upserted;
+                        }
+                    } catch { /* skip malformed line */ }
+                }
+            }
+
+            bar.value = 100;
+            statusEl.textContent = 'Done.';
+            resultEl.style.display = '';
+            resultEl.innerHTML = `<sl-alert variant="success" open><sl-icon slot="icon" name="check2-circle"></sl-icon>
+                Import complete — <strong>${totalUpserted.toLocaleString()}</strong> airports upserted.</sl-alert>`;
+            await this._loadAirportStats();
+
+        } catch (err) {
+            statusEl.textContent = 'Failed.';
+            resultEl.style.display = '';
+            resultEl.innerHTML = `<sl-alert variant="danger" open><sl-icon slot="icon" name="exclamation-octagon"></sl-icon>${this._esc(err.message)}</sl-alert>`;
+        } finally {
+            btn.disabled = false;
+            progressWrap.querySelector('sl-spinner').style.display = 'none';
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

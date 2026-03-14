@@ -340,6 +340,14 @@ AIRSPACE SAFETY (CRITICAL):
 - If you cannot avoid all restricted airspace, say so explicitly and \
   recommend the pilot consult with ATC.
 
+AIRSPACE CONFLICT DETECTION (REQUIRED):
+- After finalising your route, inspect each leg against the AIRSPACE ZONES list.
+- For every RESTRICTED, PROHIBITED, DANGER zone or CTR that your route passes through
+  or comes within 2 km of, add an entry to the airspace_conflicts array.
+- leg_index is 0-based: 0 = Takeoff→TP1, 1 = TP1→TP2, last leg = last TP→Takeoff.
+- For a conflict-free route return an empty array: "airspace_conflicts": []
+- severity: "blocking" for RESTRICTED/PROHIBITED/DANGER, "advisory" for CTR/TMA/RMZ.
+
 ROUTE DESIGN PRINCIPLES:
 - All routes must be CLOSED CIRCUITS returning to the takeoff airport.
 - For conservative/standard safety: STRONGLY prefer triangles (2 TPs) or \
@@ -585,7 +593,17 @@ def _build_task_prompt(
     lines.append('  "recommended_takeoff_time": "<HH:MM>",')
     lines.append('  "estimated_duration_hours": <float>,')
     lines.append('  "estimated_speed_kmh": <float>,')
-    lines.append('  "safety_notes": ["<note1>", "<note2>", ...]')
+    lines.append('  "safety_notes": ["<note1>", "<note2>", ...],')
+    lines.append('  "airspace_conflicts": [')
+    lines.append('    {')
+    lines.append('      "zone_name": "<exact zone name from the AIRSPACE ZONES list>",')
+    lines.append('      "zone_type": "<RESTRICTED|PROHIBITED|DANGER|CTR|TMA|RMZ|...>",')
+    lines.append('      "airspace_class": "<class letter or OTHER>",')
+    lines.append('      "leg_index": <0-based integer>,')
+    lines.append('      "severity": "<blocking|advisory>",')
+    lines.append('      "suggestion": "<brief avoidance or transit note for the pilot>"')
+    lines.append('    }')
+    lines.append('  ]')
     lines.append('}')
 
     return "\n".join(lines)

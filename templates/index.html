@@ -691,6 +691,7 @@
                         <sl-tab slot="nav" panel="admin-users"><i class="fas fa-users"></i> <span data-i18n="admin.users">Users</span></sl-tab>
                         <sl-tab slot="nav" panel="admin-content"><i class="fas fa-database"></i> <span data-i18n="admin.content">User Content</span></sl-tab>
                         <sl-tab slot="nav" panel="admin-usage"><i class="fas fa-chart-bar"></i> <span data-i18n="admin.usage">AI Usage</span></sl-tab>
+                        <sl-tab slot="nav" panel="admin-airports"><i class="fas fa-plane-departure"></i> <span data-i18n="admin.airports">Airports</span></sl-tab>
 
                         <!-- Users sub-panel -->
                         <sl-tab-panel name="admin-users">
@@ -866,6 +867,57 @@
                                     </table>
                                 </div>
                                 <div id="usage-log-pagination" class="browse-pagination" style="display:flex; gap:8px; align-items:center; justify-content:center; margin-top:12px;"></div>
+                            </div>
+                        </sl-tab-panel>
+
+                        <!-- Airports sub-panel -->
+                        <sl-tab-panel name="admin-airports">
+                            <div class="admin-toolbar" style="align-items:flex-start; flex-wrap:wrap; gap:12px;">
+                                <div style="display:flex; flex-direction:column; gap:6px; flex:1; min-width:220px;">
+                                    <label style="font-size:0.82rem; color:var(--text-secondary);" data-i18n="admin.airports_countries_label">Countries (comma-separated ISO codes, blank = all)</label>
+                                    <sl-input id="airport-import-countries" placeholder="e.g. PL DE CZ SK AT — blank for global" size="small" clearable></sl-input>
+                                </div>
+                                <div style="display:flex; gap:8px; align-items:flex-end;">
+                                    <sl-button size="small" id="airport-stats-btn" variant="default">
+                                        <i class="fas fa-table" slot="prefix"></i> <span data-i18n="admin.airports_stats_btn">Stats</span>
+                                    </sl-button>
+                                    <sl-button size="small" id="airport-import-btn" variant="primary">
+                                        <i class="fas fa-download" slot="prefix"></i> <span data-i18n="admin.airports_import_btn">Import from OpenAIP</span>
+                                    </sl-button>
+                                </div>
+                            </div>
+
+                            <div id="airport-import-progress" style="display:none; margin-top:12px;">
+                                <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+                                    <sl-spinner style="font-size:1.1rem;"></sl-spinner>
+                                    <span id="airport-import-status" style="font-size:0.9rem;"></span>
+                                </div>
+                                <sl-progress-bar id="airport-import-bar" value="0" style="--height:6px;"></sl-progress-bar>
+                            </div>
+                            <div id="airport-import-result" style="display:none; margin-top:10px;"></div>
+
+                            <div id="airport-stats-wrap" style="display:none; margin-top:16px;">
+                                <div style="display:flex; gap:16px; margin-bottom:12px; flex-wrap:wrap;">
+                                    <div class="usage-card">
+                                        <div class="usage-card-label" data-i18n="admin.airports_total">Total Airports</div>
+                                        <div class="usage-card-value" id="airport-total-count">—</div>
+                                    </div>
+                                    <div class="usage-card">
+                                        <div class="usage-card-label" data-i18n="admin.airports_countries">Countries</div>
+                                        <div class="usage-card-value" id="airport-country-count">—</div>
+                                    </div>
+                                </div>
+                                <div class="admin-table-wrap" style="max-height:400px; overflow-y:auto;">
+                                    <table class="admin-table" id="airport-stats-table">
+                                        <thead>
+                                            <tr>
+                                                <th data-i18n="admin.col_country">Country</th>
+                                                <th data-i18n="admin.col_airports">Airports</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="airport-stats-tbody"></tbody>
+                                    </table>
+                                </div>
                             </div>
                         </sl-tab-panel>
 

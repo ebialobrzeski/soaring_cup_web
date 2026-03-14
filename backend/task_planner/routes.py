@@ -802,7 +802,97 @@ def generate_task():
             except Exception:
                 logger.warning("Terrain re-check failed for validated route", exc_info=True)
 
-        # ── 8. Build response ─────────────────────────────────────────────
+        # ── 8. Airspace conflict analysis (AI-primary, programmatic fallback) ─
+        route_leg_points = (
+            [(takeoff["lat"], takeoff["lon"])]
+            + [(tp["lat"], tp["lon"]) for tp in validated["turnpoints"]]
+            + [(takeoff["lat"], takeoff["lon"])]
+        )
+
+        # Programmatic check — authoritative for zone count and blocking flag
+        prog_conflicts: list[dict] = []
+        try:
+            airspace_result = check_task_airspace(
+                db, route_leg_points, flight_date, safety_profile, constraints,
+                prefetched_zones=(pre_zones, pre_notams),
+            )
+            airspace_info = {
+                "zones_count": len(airspace_result.zones_in_area),
+                "conflicts": 0,        # updated below after merging
+                "has_blocking": airspace_result.has_blocking_conflict,
+                "conflict_list": [],   # populated below
+            }
+            prog_conflicts = [
+                {
+                    "zone_name": c.zone_name,
+                    "zone_type": c.zone_type,
+                    "airspace_class": c.airspace_class,
+                    "leg_index": c.leg_index,
+                    "suggestion": c.suggestion,
+                    "requires_transponder": c.requires_transponder,
+                    "requires_flight_plan": c.requires_flight_plan,
+                    "is_notam": c.is_notam,
+                }
+                for c in airspace_result.conflicts
+            ]
+            logger.info(
+                "Programmatic airspace check: %d conflicts (%s), %d zones in area",
+                len(prog_conflicts),
+                "BLOCKING" if airspace_result.has_blocking_conflict else "advisory",
+                len(airspace_result.zones_in_area),
+            )
+        except Exception:
+            logger.warning("Programmatic airspace re-check failed", exc_info=True)
+            if airspace_info is None:
+                airspace_info = {
+                    "zones_count": len(pre_zones),
+                    "conflicts": 0,
+                    "has_blocking": False,
+                    "conflict_list": [],
+                }
+
+        # AI-reported conflicts are the primary source of conflict details.
+        # The AI reasoned about each leg using the full zone list it received.
+        # Enrich each AI conflict with metadata from the pre-fetched zone objects.
+        ai_conflicts_raw = ai_result.get("airspace_conflicts") or []
+        zone_meta_by_name = {z.name: z for z in pre_zones}
+
+        if ai_conflicts_raw:
+            conflict_list: list[dict] = []
+            for ac in ai_conflicts_raw:
+                if not isinstance(ac, dict):
+                    continue
+                z_name = ac.get("zone_name", "")
+                z_meta = zone_meta_by_name.get(z_name)
+                conflict_list.append({
+                    "zone_name": z_name,
+                    "zone_type": ac.get("zone_type") or (z_meta.type if z_meta else ""),
+                    "airspace_class": ac.get("airspace_class") or (z_meta.airspace_class if z_meta else ""),
+                    "leg_index": ac.get("leg_index", 0),
+                    "suggestion": ac.get("suggestion", ""),
+                    "severity": ac.get("severity", "advisory"),
+                    "requires_transponder": getattr(z_meta, "requires_transponder", False) if z_meta else False,
+                    "requires_flight_plan": getattr(z_meta, "requires_flight_plan", False) if z_meta else False,
+                    "is_notam": False,
+                })
+            is_ai_blocking = any(c.get("severity") == "blocking" for c in conflict_list)
+            airspace_info["conflict_list"] = conflict_list
+            airspace_info["conflicts"] = len(conflict_list)
+            airspace_info["has_blocking"] = airspace_info.get("has_blocking", False) or is_ai_blocking
+            logger.info(
+                "AI airspace conflicts: %d (programmatic geometric check had %d)",
+                len(conflict_list), len(prog_conflicts),
+            )
+        else:
+            # AI returned no conflicts — fall back to programmatic geometric results
+            airspace_info["conflict_list"] = prog_conflicts
+            airspace_info["conflicts"] = len(prog_conflicts)
+            logger.info(
+                "AI returned no airspace_conflicts — using programmatic results (%d)",
+                len(prog_conflicts),
+            )
+
+        # ── 9. Build response ─────────────────────────────────────────────
         # Flight time estimate
         flight_est = estimate_flight_time(
             validated["total_distance_km"],

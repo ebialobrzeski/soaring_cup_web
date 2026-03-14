@@ -751,7 +751,11 @@ class AiPlanner {
         this._renderLegs(task.legs || []);
 
         // Airspace conflicts
-        if (proposal.airspace?.conflicts > 0) {
+        const conflictList = proposal.airspace?.conflict_list;
+        if (conflictList?.length > 0) {
+            this._renderConflicts(conflictList);
+        } else if (proposal.airspace?.conflicts > 0) {
+            // Fallback for old sessions without conflict_list
             this._renderConflicts([{
                 zone_name: `${proposal.airspace.conflicts} airspace conflict(s)`,
                 zone_type: proposal.airspace.has_blocking ? 'blocking' : 'advisory',
@@ -871,10 +875,15 @@ class AiPlanner {
 
         let html = '<h4><i class="fas fa-exclamation-triangle"></i> Airspace Conflicts</h4><ul class="aip-conflict-list">';
         conflicts.forEach(c => {
-            const icon = c.suggestion === 'avoid'
+            const isBlocking = c.severity === 'blocking'
+                || c.suggestion === 'avoid'
+                || ['RESTRICTED', 'PROHIBITED', 'DANGER'].includes(c.zone_type);
+            const icon = isBlocking
                 ? '<i class="fas fa-ban" style="color:var(--sl-color-danger-500)"></i>'
                 : '<i class="fas fa-info-circle" style="color:var(--sl-color-warning-500)"></i>';
-            html += `<li>${icon} <strong>${this._escapeHtml(c.zone_name)}</strong> (${c.zone_type}) — ${c.suggestion}</li>`;
+            const leg = (c.leg_index != null) ? ` leg ${c.leg_index + 1}` : '';
+            const cls = c.airspace_class && c.airspace_class !== '?' ? ` class ${this._escapeHtml(c.airspace_class)}` : '';
+            html += `<li>${icon} <strong>${this._escapeHtml(c.zone_name)}</strong> (${this._escapeHtml(c.zone_type)}${cls}${leg}) — ${this._escapeHtml(c.suggestion)}</li>`;
         });
         html += '</ul>';
         el.innerHTML = html;

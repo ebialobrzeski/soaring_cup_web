@@ -10,12 +10,15 @@ Routes (all require admin tier):
   DELETE /api/admin/content/tasks/<task_id>        — delete a task
   GET    /api/admin/usage/summary                  — AI planner usage analytics
   GET    /api/admin/usage/log                      — paginated usage log
+  GET    /api/admin/airports/stats                 — airport table row counts
+  POST   /api/admin/airports/import                — trigger OpenAIP airport import
 """
 from __future__ import annotations
 
 import logging
+import threading
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, Response, stream_with_context
 
 from backend.db import get_db
 from backend.services import admin_service
@@ -173,3 +176,131 @@ def usage_log():
     except Exception:
         logger.exception('Failed to get usage log')
         return jsonify({'error': 'Failed to retrieve usage log.'}), 500
+
+
+# ── Airport import ───────────────────────────────────────────────────────────
+
+@admin_bp.route('/airports/stats', methods=['GET'])
+@admin_required
+def airport_stats():
+    """Return airport row counts grouped by country."""
+    db = get_db()
+    from sqlalchemy import text
+    rows = db.execute(text(
+        'SELECT country, COUNT(*) AS cnt FROM airports GROUP BY country ORDER BY cnt DESC'
+    )).fetchall()
+    total = sum(r[1] for r in rows)
+    return jsonify({
+        'total': total,
+        'by_country': [{'country': r[0] or '??', 'count': r[1]} for r in rows],
+    })
+
+
+@admin_bp.route('/airports/import', methods=['POST'])
+@admin_required
+def import_airports():
+    """Trigger an OpenAIP airport import and stream progress as newline-delimited JSON.
+
+    Body (JSON, all optional):
+      countries: list[str]  — ISO country codes (default: all)
+      types:     list[int]  — OpenAIP type IDs (default: [0,1,2,3,4,5,6])
+    """
+    data = request.get_json(silent=True) or {}
+    countries = data.get('countries') or None
+    types_raw = data.get('types')
+    allowed_types = set(types_raw) if types_raw else None
+
+    from backend.scripts.import_airports_openaip import (
+        ALL_COUNTRIES, DEFAULT_TYPES,
+        _fetch_airports_for_country, _parse_airport,
+    )
+    from backend.config import OPENAIP_API_KEY, DATABASE_URL
+    import json as _json
+    import time as _time
+    import psycopg2
+    import psycopg2.extras
+
+    if not OPENAIP_API_KEY:
+        return jsonify({'error': 'OPENAIP_API_KEY is not configured on this server.'}), 400
+
+    target_countries = countries or ALL_COUNTRIES
+    target_types = allowed_types if allowed_types is not None else DEFAULT_TYPES
+
+    def _generate():
+        db_url = DATABASE_URL.strip('"').strip("'")
+        upsert_sql = """
+            INSERT INTO airports (
+                id, "icaoCode", name, latitude, longitude,
+                elevation, timezone, country, "isActive", "runwayDirection",
+                "createdAt", "updatedAt"
+            ) VALUES (
+                %(id)s, %(icaoCode)s, %(name)s, %(latitude)s, %(longitude)s,
+                %(elevation)s, %(timezone)s, %(country)s, %(isActive)s, %(runwayDirection)s,
+                NOW(), NOW()
+            )
+            ON CONFLICT (id) DO UPDATE SET
+                "icaoCode"        = EXCLUDED."icaoCode",
+                name              = EXCLUDED.name,
+                latitude          = EXCLUDED.latitude,
+                longitude         = EXCLUDED.longitude,
+                elevation         = EXCLUDED.elevation,
+                country           = EXCLUDED.country,
+                "isActive"        = EXCLUDED."isActive",
+                "runwayDirection" = EXCLUDED."runwayDirection",
+                "updatedAt"       = NOW()
+        """
+        total_upserted = 0
+        total_errors = 0
+
+        try:
+            conn = psycopg2.connect(db_url)
+            conn.autocommit = False
+            cur = conn.cursor()
+        except Exception as exc:
+            yield _json.dumps({'type': 'error', 'message': f'DB connection failed: {exc}'}) + '\n'
+            return
+
+        yield _json.dumps({
+            'type': 'start',
+            'total_countries': len(target_countries),
+        }) + '\n'
+
+        for i, country in enumerate(target_countries, 1):
+            items = _fetch_airports_for_country(country, target_types)
+            count = len(items)
+            if items:
+                rows = [_parse_airport(item) for item in items]
+                try:
+                    psycopg2.extras.execute_batch(cur, upsert_sql, rows, page_size=100)
+                    conn.commit()
+                    total_upserted += count
+                except Exception as exc:
+                    conn.rollback()
+                    logger.error('Airport import DB error for %s: %s', country, exc)
+                    total_errors += count
+                    count = 0
+
+            yield _json.dumps({
+                'type': 'progress',
+                'country': country,
+                'index': i,
+                'total': len(target_countries),
+                'upserted': count,
+                'total_upserted': total_upserted,
+                'total_errors': total_errors,
+            }) + '\n'
+            _time.sleep(0.3)
+
+        cur.close()
+        conn.close()
+
+        yield _json.dumps({
+            'type': 'done',
+            'total_upserted': total_upserted,
+            'total_errors': total_errors,
+        }) + '\n'
+
+    return Response(
+        stream_with_context(_generate()),
+        mimetype='application/x-ndjson',
+    )
