@@ -10,6 +10,7 @@ import uuid
 import io
 import tempfile
 import logging
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
@@ -452,7 +453,7 @@ def download_task():
             suffix = '.cup'
             mimetype = 'text/plain'
 
-        safe_name = task_name.replace(' ', '_')[:TASK_NAME_MAX_LEN]
+        safe_name = _ascii_filename(task_name)
         from flask import Response
         return Response(
             content.encode('utf-8'),
@@ -765,6 +766,22 @@ TASK_NAME_MAX_LEN = 100             # maximum task name length
 TASK_MAX_POINTS = 50                # maximum task waypoints
 
 
+def _ascii_filename(name: str, fallback: str = 'task') -> str:
+    """Return an ASCII-only filename fragment safe for use in HTTP headers.
+
+    WSGI servers encode header values as ISO-8859-1.  Characters outside that
+    range (e.g. Polish ą, ł, ę) cause a UnicodeEncodeError at the transport
+    layer – *after* the route's try/except – resulting in an HTML 500 page
+    instead of the expected JSON error.  This function strips such chars via
+    NFKD normalisation so that decomposable characters keep their ASCII base
+    (e.g. ó→o) while truly non-decomposable ones are dropped.
+    """
+    normalized = unicodedata.normalize('NFKD', name.replace(' ', '_'))
+    ascii_only = normalized.encode('ascii', 'ignore').decode('ascii')
+    safe = ''.join(c if (c.isalnum() or c in '-_.') else '_' for c in ascii_only).strip('_')
+    return safe[:TASK_NAME_MAX_LEN] or fallback
+
+
 def _get_base_url():
     """Return the base URL for share links.
 
@@ -1027,7 +1044,7 @@ def share_download(token):
         }
         writer, suffix, mimetype = fmt_map.get(fmt, (write_task_cup, '.cup', 'text/plain'))
         content = writer(task_name, task_waypoints, obs_zones, task_options)
-        safe_name = task_name.replace(' ', '_')[:TASK_NAME_MAX_LEN]
+        safe_name = _ascii_filename(task_name)
         from flask import Response
         return Response(
             content.encode('utf-8'),
