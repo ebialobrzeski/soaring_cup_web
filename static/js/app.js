@@ -87,7 +87,8 @@ class SoaringCupEditor {
             if (panel === 'task') {
                 // Show overlay when no waypoints are loaded (editor mode only)
                 if (!window.VIEW_MODE) {
-                    const hasWaypoints = this.waypoints && this.waypoints.length > 0;
+                    const hasWaypoints = (this.waypoints && this.waypoints.length > 0)
+                        || (window.taskPlanner && window.taskPlanner.taskPoints && window.taskPlanner.taskPoints.length > 0);
                     const overlay = document.getElementById('task-no-waypoints-overlay');
                     if (overlay) overlay.style.display = hasWaypoints ? 'none' : 'flex';
                 }

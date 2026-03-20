@@ -248,7 +248,7 @@ def health_check():
     
     # Test external API connectivity
     try:
-        response = requests.get('https://api.open-elevation.com/api/v1/lookup?locations=52.0,21.0', timeout=5)
+        response = requests.get('https://api.opentopodata.org/v1/srtm30m?locations=52.0,21.0', timeout=5)
         health_status['elevation_api'] = 'reachable' if response.status_code == 200 else 'unreachable'
         health_status['elevation_api_status'] = response.status_code
     except requests.exceptions.Timeout:

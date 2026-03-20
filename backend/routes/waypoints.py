@@ -1,22 +1,25 @@
 """Waypoints blueprint — /api/waypoints/*
 
 Routes in this blueprint:
-  GET    /api/waypoints                   — session waypoints (anon)
-  POST   /api/waypoints                   — add to session (anon)
-  PUT    /api/waypoints/<idx>             — update session waypoint (anon)
-  DELETE /api/waypoints/<idx>             — delete session waypoint (anon)
-  GET    /api/waypoints/files             — list saved files (login)
-  POST   /api/waypoints/files             — save session → new file (login)
-  GET    /api/waypoints/files/<id>        — load file into session (login)
-  PUT    /api/waypoints/files/<id>        — overwrite file from session (login)
-  DELETE /api/waypoints/files/<id>        — delete saved file (login)
+  GET    /api/waypoints                        — session waypoints (anon)
+  POST   /api/waypoints                        — add to session (anon)
+  PUT    /api/waypoints/<idx>                  — update session waypoint (anon)
+  DELETE /api/waypoints/<idx>                  — delete session waypoint (anon)
+  GET    /api/waypoints/files                  — list saved files (login)
+  POST   /api/waypoints/files                  — save session → new file (login)
+  GET    /api/waypoints/files/<id>             — load file into session (login)
+  PUT    /api/waypoints/files/<id>             — overwrite file from session (login)
+  DELETE /api/waypoints/files/<id>             — delete saved file (login)
+  GET    /api/waypoints/files/<id>/download    — download file as .cup (login)
   PATCH  /api/waypoints/files/<id>/visibility  — toggle public/private (premium)
 """
 from __future__ import annotations
 
 import logging
 
-from flask import Blueprint, jsonify, request, session
+import unicodedata
+
+from flask import Blueprint, jsonify, request, session, Response
 from flask_login import current_user
 
 from backend.db import get_db
@@ -228,6 +231,49 @@ def delete_file(file_id):
         return jsonify({'error': 'Waypoint file not found.'}), 404
     db.commit()
     return '', 204
+
+
+@waypoints_bp.route('/files/<file_id>/download', methods=['GET'])
+@login_required
+def download_file(file_id):
+    """Download a saved waypoint file as a .cup attachment."""
+    from backend.file_io import write_cup_file
+    from backend.models.legacy import Waypoint
+
+    db = get_db()
+    wf = waypoint_service.get_file(db, current_user, file_id)
+    if wf is None:
+        return jsonify({'error': 'Waypoint file not found.'}), 404
+
+    entries = list(wf.entries.order_by('sort_order'))
+    wps = [
+        Waypoint(
+            name=e.name,
+            code=e.code or '',
+            country=e.country or '',
+            latitude=float(e.latitude),
+            longitude=float(e.longitude),
+            elevation=f'{e.elevation}m' if e.elevation else '',
+            style=e.style,
+            runway_direction=e.runway_direction or 0,
+            runway_length=e.runway_length or 0,
+            runway_width=e.runway_width or 0,
+            frequency=e.frequency or '',
+            description=e.description or '',
+        )
+        for e in entries
+    ]
+    content = write_cup_file(wps)
+
+    normalized = unicodedata.normalize('NFKD', wf.name.replace(' ', '_'))
+    safe_name = normalized.encode('ascii', 'ignore').decode('ascii')
+    safe_name = ''.join(c if (c.isalnum() or c in '-_.') else '_' for c in safe_name).strip('_') or 'waypoints'
+
+    return Response(
+        content.encode('utf-8'),
+        mimetype='text/plain',
+        headers={'Content-Disposition': f'attachment; filename="{safe_name}.cup"'},
+    )
 
 
 @waypoints_bp.route('/files/<file_id>/visibility', methods=['PATCH'])

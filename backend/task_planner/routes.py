@@ -34,6 +34,8 @@ from backend.task_planner.airspace import (
     check_task_airspace,
     compute_airspace_score,
     fetch_airspace_from_openaip,
+    _point_in_polygon,
+    _suggest_action,
 )
 from backend.task_planner.optimizer import (
     estimate_flight_time,
@@ -667,6 +669,29 @@ def generate_task():
         )
         g._aip_external_calls["waypoints"] = len(waypoints)
 
+        # Filter out waypoints that fall inside zones the user wants to avoid.
+        # LLMs cannot reliably do polygon intersection math, so sending restricted-zone
+        # waypoints to the AI causes it to propose invalid routes (e.g. NAREW 2 inside EPR130).
+        # Uses _suggest_action to respect the user's Airspace Constraints toggles —
+        # e.g. if exclude_restricted=False the user accepts those zones, so we don't filter them.
+        _effective_constraints = constraints or {}
+        if pre_zones:
+            def _wp_should_exclude(wp) -> bool:
+                for z in pre_zones:
+                    if not z.polygon:
+                        continue
+                    if _suggest_action(z, _effective_constraints) != "avoid":
+                        continue
+                    if _point_in_polygon(wp.lat, wp.lon, z.polygon):
+                        logger.info(
+                            "Waypoint '%s' (%.4f,%.4f) excluded — inside %s %s",
+                            wp.name, wp.lat, wp.lon, z.type, z.name,
+                        )
+                        return True
+                return False
+            waypoints = [wp for wp in waypoints if not _wp_should_exclude(wp)]
+            logger.info("Waypoints after airspace filter: %d", len(waypoints))
+
         if not waypoints:
             _update_session(db, session_id, "error",
                             error_message="No waypoints found in the task area.")
@@ -891,43 +916,51 @@ def generate_task():
                         seen[key]["severity"] = "blocking"
             return list(seen.values())
 
-        if ai_conflicts_raw:
-            conflict_list: list[dict] = []
-            for ac in ai_conflicts_raw:
-                if not isinstance(ac, dict):
-                    continue
-                if not _is_actionable(ac):
-                    continue
-                z_name = ac.get("zone_name", "")
-                z_meta = zone_meta_by_name.get(z_name)
-                conflict_list.append({
-                    "zone_name": z_name,
-                    "zone_type": ac.get("zone_type") or (z_meta.type if z_meta else ""),
-                    "airspace_class": ac.get("airspace_class") or (z_meta.airspace_class if z_meta else ""),
-                    "leg_index": ac.get("leg_index", 0),
-                    "suggestion": ac.get("suggestion", ""),
-                    "severity": ac.get("severity", "advisory"),
-                    "requires_transponder": getattr(z_meta, "requires_transponder", False) if z_meta else False,
-                    "requires_flight_plan": getattr(z_meta, "requires_flight_plan", False) if z_meta else False,
-                    "is_notam": False,
+        # Build AI conflict list (filtered to actionable types)
+        ai_conflict_list: list[dict] = []
+        for ac in ai_conflicts_raw:
+            if not isinstance(ac, dict):
+                continue
+            if not _is_actionable(ac):
+                continue
+            z_name = ac.get("zone_name", "")
+            z_meta = zone_meta_by_name.get(z_name)
+            ai_conflict_list.append({
+                "zone_name": z_name,
+                "zone_type": ac.get("zone_type") or (z_meta.type if z_meta else ""),
+                "airspace_class": ac.get("airspace_class") or (z_meta.airspace_class if z_meta else ""),
+                "leg_index": ac.get("leg_index", 0),
+                "suggestion": ac.get("suggestion", ""),
+                "severity": ac.get("severity", "advisory"),
+                "requires_transponder": getattr(z_meta, "requires_transponder", False) if z_meta else False,
+                "requires_flight_plan": getattr(z_meta, "requires_flight_plan", False) if z_meta else False,
+                "is_notam": False,
+            })
+
+        # Always merge programmatic geometric results into the conflict list.
+        # The AI is not reliable at polygon-intersection math, so it can miss zones
+        # (e.g. it detected EPR28 but missed EPR130 whose turnpoint falls inside).
+        # Only add programmatic conflicts where suggestion=="avoid" — this already
+        # respects the user's Airspace Constraints (exclude_restricted, exclude_danger etc.)
+        # since check_task_airspace() uses _suggest_action() internally.
+        ai_reported_names = {c["zone_name"] for c in ai_conflict_list}
+        for pc in prog_conflicts:
+            if pc.get("suggestion") == "avoid" and pc["zone_name"] not in ai_reported_names:
+                ai_conflict_list.append({
+                    **pc,
+                    "severity": "blocking",
+                    "is_notam": pc.get("is_notam", False),
                 })
-            conflict_list = _deduplicate_conflicts(conflict_list)
-            is_ai_blocking = any(c.get("severity") == "blocking" for c in conflict_list)
-            airspace_info["conflict_list"] = conflict_list
-            airspace_info["conflicts"] = len(conflict_list)
-            airspace_info["has_blocking"] = airspace_info.get("has_blocking", False) or is_ai_blocking
-            logger.info(
-                "AI airspace conflicts after filter+dedup: %d (raw: %d, programmatic: %d)",
-                len(conflict_list), len(ai_conflicts_raw), len(prog_conflicts),
-            )
-        else:
-            # AI returned no conflicts — fall back to programmatic geometric results
-            airspace_info["conflict_list"] = prog_conflicts
-            airspace_info["conflicts"] = len(prog_conflicts)
-            logger.info(
-                "AI returned no airspace_conflicts — using programmatic results (%d)",
-                len(prog_conflicts),
-            )
+
+        conflict_list = _deduplicate_conflicts(ai_conflict_list)
+        is_blocking = any(c.get("severity") == "blocking" for c in conflict_list)
+        airspace_info["conflict_list"] = conflict_list
+        airspace_info["conflicts"] = len(conflict_list)
+        airspace_info["has_blocking"] = airspace_info.get("has_blocking", False) or is_blocking
+        logger.info(
+            "Final airspace conflicts: %d (AI raw: %d, programmatic: %d)",
+            len(conflict_list), len(ai_conflicts_raw), len(prog_conflicts),
+        )
 
         # ── 9. Build response ─────────────────────────────────────────────
         # Flight time estimate

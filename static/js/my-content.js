@@ -275,6 +275,9 @@ class MyContentPanel {
                 <td>${visBadge}</td>
                 <td>${date}</td>
                 <td class="admin-actions-cell">
+                    <sl-button size="small" variant="neutral" class="mc-dl-btn" title="Download as CUP">
+                        <i class="fas fa-download"></i>
+                    </sl-button>
                     <sl-button size="small" variant="primary" class="mc-load-btn" title="Load into editor">
                         <i class="fas fa-upload"></i>
                     </sl-button>
@@ -291,10 +294,20 @@ class MyContentPanel {
         tbody.querySelectorAll('tr[data-id]').forEach(row => {
             const id = row.dataset.id;
             const file = files.find(f => f.id === id);
+            row.querySelector('.mc-dl-btn')?.addEventListener('click', () => this._downloadFile(id));
             row.querySelector('.mc-load-btn')?.addEventListener('click', () => this._loadFile(id));
             row.querySelector('.mc-vis-btn')?.addEventListener('click', () => this._toggleFileVis(id, file, row));
             row.querySelector('.mc-del-btn')?.addEventListener('click', () => this._deleteFile(id, file, row));
         });
+    }
+
+    _downloadFile(id) {
+        const a = document.createElement('a');
+        a.href = `/api/waypoints/files/${encodeURIComponent(id)}/download`;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
     }
 
     async _loadFile(id) {
@@ -406,6 +419,17 @@ class MyContentPanel {
                 <td>${visBadge}</td>
                 <td>${date}</td>
                 <td class="admin-actions-cell">
+                    <sl-dropdown class="mc-task-dl-dropdown">
+                        <sl-button slot="trigger" size="small" variant="neutral" caret title="Download">
+                            <i class="fas fa-download"></i>
+                        </sl-button>
+                        <sl-menu>
+                            <sl-menu-item data-fmt="cup">SeeYou CUP (.cup)</sl-menu-item>
+                            <sl-menu-item data-fmt="tsk">XCSoar TSK (.tsk)</sl-menu-item>
+                            <sl-menu-item data-fmt="xctsk">XCTrack XCTSK (.xctsk)</sl-menu-item>
+                            <sl-menu-item data-fmt="lkt">LK8000 LKT (.lkt)</sl-menu-item>
+                        </sl-menu>
+                    </sl-dropdown>
                     <sl-button size="small" variant="primary" class="mc-load-btn" title="Load into Task Planner">
                         <i class="fas fa-upload"></i>
                     </sl-button>
@@ -422,10 +446,20 @@ class MyContentPanel {
         tbody.querySelectorAll('tr[data-id]').forEach(row => {
             const id = row.dataset.id;
             const task = tasks.find(t => t.id === id);
+            row.querySelector('.mc-task-dl-dropdown')?.addEventListener('sl-select', (e) => this._downloadTask(id, e.detail.item.dataset.fmt));
             row.querySelector('.mc-load-btn')?.addEventListener('click', () => this._loadTask(task));
             row.querySelector('.mc-vis-btn')?.addEventListener('click', () => this._toggleTaskVis(id, task, row));
             row.querySelector('.mc-del-btn')?.addEventListener('click', () => this._deleteTask(id, task, row));
         });
+    }
+
+    _downloadTask(id, format) {
+        const a = document.createElement('a');
+        a.href = `/api/tasks/${encodeURIComponent(id)}/download?format=${encodeURIComponent(format)}`;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
     }
 
     _loadTask(task) {

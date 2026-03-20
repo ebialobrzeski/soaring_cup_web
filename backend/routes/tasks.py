@@ -6,6 +6,7 @@ Routes:
   GET    /api/tasks/<id>             — load task (login)
   PUT    /api/tasks/<id>             — update task (login)
   DELETE /api/tasks/<id>             — delete task (login)
+  GET    /api/tasks/<id>/download    — download saved task file (login)
   PATCH  /api/tasks/<id>/visibility  — toggle public/private (premium)
   POST   /api/task/export            — export task as CUP string (anon)
   POST   /api/task/download          — download task file (anon)
@@ -14,8 +15,9 @@ Routes:
 from __future__ import annotations
 
 import logging
+import unicodedata
 
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, jsonify, request, session, Response
 from flask_login import current_user
 
 from backend.db import get_db
@@ -118,6 +120,55 @@ def delete_task(task_id):
         return jsonify({'error': 'Task not found.'}), 404
     db.commit()
     return '', 204
+
+
+@tasks_bp.route('/api/tasks/<task_id>/download', methods=['GET'])
+@login_required
+def download_task(task_id):
+    """Download a saved task as a file. ?format=cup|tsk|xctsk|lkt (default: cup)"""
+    from backend.file_io import write_task_cup, write_task_tsk, write_task_xctsk, write_task_lkt
+    from backend.models.legacy import Waypoint
+
+    db = get_db()
+    task = task_service.get_task(db, current_user, task_id)
+    if task is None:
+        return jsonify({'error': 'Task not found.'}), 404
+
+    fmt = request.args.get('format', 'cup').lower()
+    task_data = task.task_data or {}
+    points = task_data.get('points', [])
+    options = task_data.get('options', {})
+
+    if len(points) < 2:
+        return jsonify({'error': 'Task has fewer than 2 points.'}), 400
+
+    wps = []
+    obs_zones = []
+    for tp in points:
+        inline = tp.get('waypoint') or {}
+        if not inline.get('latitude') or not inline.get('longitude'):
+            return jsonify({'error': 'Task point missing waypoint data.'}), 400
+        wps.append(Waypoint.from_dict(inline))
+        obs_zones.append(tp.get('obsZone', {}))
+
+    fmt_map = {
+        'tsk':   (write_task_tsk,   '.tsk',   'application/xml'),
+        'xctsk': (write_task_xctsk, '.xctsk', 'application/json'),
+        'lkt':   (write_task_lkt,   '.lkt',   'application/xml'),
+    }
+    writer, suffix, mimetype = fmt_map.get(fmt, (write_task_cup, '.cup', 'text/plain'))
+    content = writer(task.name, wps, obs_zones, options)
+
+    normalized = unicodedata.normalize('NFKD', task.name.replace(' ', '_'))
+    safe_name = normalized.encode('ascii', 'ignore').decode('ascii')
+    safe_name = ''.join(c if (c.isalnum() or c in '-_.') else '_' for c in safe_name).strip('_') or 'task'
+    safe_name = safe_name[:100]
+
+    return Response(
+        content.encode('utf-8'),
+        mimetype=mimetype,
+        headers={'Content-Disposition': f'attachment; filename="{safe_name}{suffix}"'},
+    )
 
 
 @tasks_bp.route('/api/tasks/<task_id>/visibility', methods=['PATCH'])
