@@ -1,0 +1,3 @@
+1. After logging in and going straight to my account, after I try to load a task, the map view is covered by the screen saying "Load a waypoint file or add waypoints in Map View to start planning a task."
+2. I want to have a download button next to my waypoints and tasks in the My Account tab. Waypoints I want to be able to download in CUP format and tasks in the format I select (like it's done on Task Planner)
+3. Addint waypoints through "Add Waypoint On Map" takes a really long time to save, and it seems like it's not fetching the elevation or it's because of the API we use for fetching elevation.
